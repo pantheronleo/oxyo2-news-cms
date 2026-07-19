@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+dist
+.turbo
+.env
+.env.*
+!.env.example
+uploads
+coverage
+*.log
+apps/admin/.vite
+packages/database/prisma/dev.db

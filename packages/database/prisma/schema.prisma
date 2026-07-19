@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum ContentType {
+  POST
+  PAGE
+}
+enum ContentStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+enum ResetTokenStatus {
+  ACTIVE
+  USED
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  name String @default("Administrator")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  resetTokens PasswordResetToken[]
+}
+
+model Content {
+  id String @id @default(cuid())
+  type ContentType
+  status ContentStatus @default(DRAFT)
+  title String
+  slug String
+  excerpt String @default("")
+  category String @default("General")
+  authorName String @default("Editorial Desk")
+  sourceLabel String?
+  isFeatured Boolean @default(false)
+  categoryId String?
+  categoryRef Category? @relation("ContentCategory", fields: [categoryId], references: [id], onDelete: SetNull)
+  markdown String @default("") @db.Text
+  html String @default("") @db.Text
+  wordCount Int @default(0)
+  coverMediaId String?
+  coverMedia Media? @relation("CoverMedia", fields: [coverMediaId], references: [id], onDelete: SetNull)
+  tags String[] @default([])
+  seoTitle String?
+  seoDescription String?
+  publishedAt DateTime?
+  scheduledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([type, slug])
+  @@index([type, status, publishedAt])
+  @@index([type, category, status, publishedAt])
+  @@index([type, categoryId, status, publishedAt])
+  @@index([type, isFeatured, status, publishedAt])
+  @@index([updatedAt])
+}
+
+model Category {
+  id String @id @default(cuid())
+  name String @unique
+  slug String @unique
+  description String @default("")
+  color String @default("#2521E1")
+  sortOrder Int @default(0)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contents Content[] @relation("ContentCategory")
+  @@index([isActive, sortOrder])
+}
+
+model Media {
+  id String @id @default(cuid())
+  filename String
+  originalName String
+  path String @unique
+  url String
+  mimeType String
+  extension String
+  size BigInt
+  checksum String
+  width Int?
+  height Int?
+  duration Float?
+  altText String @default("")
+  caption String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  covers Content[] @relation("CoverMedia")
+  @@index([createdAt])
+}
+
+model PasswordResetToken {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  status ResetTokenStatus @default(ACTIVE)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, status])
+}

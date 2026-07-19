@@ -1,0 +1,17 @@
+{
+  "name": "Globaly — Magazine News",
+  "short_name": "Globaly",
+  "description": "Independent magazine-style news, analysis, and editorial explainers for curious readers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#050505",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

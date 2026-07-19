@@ -1,0 +1,18 @@
+{
+    "name": "personal-cms",
+    "private": true,
+    "packageManager": "pnpm@11.7.0",
+    "scripts": {
+        "dev": "turbo dev",
+        "build": "turbo build",
+        "test": "turbo test",
+        "typecheck": "turbo typecheck",
+        "db:generate": "pnpm --filter @cms/database generate",
+        "db:migrate": "pnpm --filter @cms/database migrate",
+        "db:seed": "pnpm --filter @cms/database seed"
+    },
+    "devDependencies": {
+        "turbo": "^2.5.4",
+        "typescript": "^5.8.3"
+    }
+}
