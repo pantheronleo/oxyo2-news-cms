@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-: "${CMS_HOST:?Set CMS_HOST, e.g. ubuntu@example.com}"
-CMS_KEY="${CMS_KEY:-$HOME/.ssh/id_ed25519}"
+CMS_HOST="${CMS_HOST:-ubuntu@13.213.46.63}"
+CMS_KEY="${CMS_KEY:-$HOME/.ssh/oxyo2-key.pem}"
 CMS_DIR="${CMS_DIR:-/home/ubuntu/apps/cms}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:4000/ready}"
 
@@ -22,7 +22,11 @@ source "$HOME/.bashrc" || true
 command -v pnpm >/dev/null || { echo 'pnpm is required; run deploy/bootstrap-ubuntu.sh first'; exit 1; }
 command -v pm2 >/dev/null || { echo 'pm2 is required; run deploy/bootstrap-ubuntu.sh first'; exit 1; }
 test -f .env.production || { echo '.env.production is missing on the server'; exit 1; }
-set -a; source .env.production; set +a
+# Keep production secrets server-only. As in GRV3, refresh the runtime .env on
+# every deploy so Node tooling and PM2 receive the same production values.
+cp .env.production .env
+echo 'Using .env.production as the deployment and runtime environment.'
+set -a; source .env; set +a
 export UPLOAD_DIR="${UPLOAD_DIR:-$CMS_DIR/shared/uploads}"
 mkdir -p "$UPLOAD_DIR"
 
