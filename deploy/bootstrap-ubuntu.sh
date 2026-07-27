@@ -6,6 +6,9 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo corepack enable
 sudo npm install -g pm2
+DEPLOY_USER="${SUDO_USER:-$USER}"
+DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" | cut -d: -f6)"
+sudo env PATH="$PATH" pm2 startup systemd -u "$DEPLOY_USER" --hp "$DEPLOY_HOME"
 sudo mkdir -p /home/ubuntu/apps/cms/shared/uploads
 sudo chown -R ubuntu:ubuntu /home/ubuntu/apps/cms
-echo "Create the PostgreSQL database/user and .env.production before deploying. See README.md."
+echo "Create the PostgreSQL database/user and .env.production before deploying. PM2 startup is configured; the first deployment will save cms-api and cms-news-bot-worker. See README.md."

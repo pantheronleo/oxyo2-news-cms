@@ -52,7 +52,15 @@ The demo news seed uses remote Unsplash image URLs for thumbnails and in-article
    CREATE DATABASE cms OWNER cms;
    ```
 
-3. Create `/home/ubuntu/apps/cms/.env.production` from `.env.example`. Set `PUBLIC_BASE_URL` to the public news HTTPS origin, `ADMIN_ORIGIN` to the CMS admin HTTPS origin, and `UPLOAD_DIR=/home/ubuntu/apps/cms/shared/uploads`. This file is never synchronized.
+3. Create `/home/ubuntu/apps/cms/.env.production` from `.env.production.example`, then replace all `REPLACE_ME` values and protect the file:
+
+   ```bash
+   cd /home/ubuntu/apps/cms
+   cp .env.production.example .env.production
+   chmod 600 .env.production
+   ```
+
+   Set `PUBLIC_BASE_URL` to the public news HTTPS origin, `ADMIN_ORIGIN` to the CMS admin HTTPS origin, and `UPLOAD_DIR=/home/ubuntu/apps/cms/shared/uploads`. `OPENAI_API_KEY` is required before production news-bot processing can run. Add stock provider keys only for the providers you intend to use; the fallback order is Pexels, Pixabay, Unsplash, then AI generation. This file is never synchronized.
 4. Replace `CMS_ADMIN_DOMAIN` and `NEWS_DOMAIN` in `deploy/nginx.conf`, copy it to `/etc/nginx/sites-available/cms`, enable it, test with `sudo nginx -t`, and reload Nginx.
 5. Configure HTTPS with Certbot (`sudo apt install certbot python3-certbot-nginx && sudo certbot --nginx -d admin-domain -d news-domain`). Secure cookies require HTTPS in production.
 6. Seed once on the server: `set -a; source .env.production; set +a; pnpm db:seed`.
@@ -62,11 +70,19 @@ The demo news seed uses remote Unsplash image URLs for thumbnails and in-article
    CMS_HOST=ubuntu@your-host CMS_KEY="$HOME/.ssh/key.pem" ./deploy-rsync.sh
    ```
 
-The script syncs source without secrets/uploads, installs locked dependencies, applies migrations, builds both apps, reloads PM2 only after success, and verifies readiness. A failed pre-reload build leaves the healthy process untouched. For an application rollback, check out the prior revision locally and redeploy; database migrations must remain forward-compatible.
+The script syncs source without secrets/uploads, installs locked dependencies, applies migrations, validates the production configuration, builds both apps, and starts/reloads both the API and the dedicated news-bot worker in PM2 only after success. It checks each process has a live PID, prints their PM2 status, and then verifies API readiness. A failed pre-reload build or configuration check leaves the healthy process untouched. For an application rollback, check out the prior revision locally and redeploy; database migrations must remain forward-compatible.
+
+`deploy/bootstrap-ubuntu.sh` configures PM2 startup persistence. If the server was bootstrapped before this update, run the following once so the API and worker resume after a host reboot:
+
+```bash
+pm2 startup systemd -u ubuntu --hp /home/ubuntu
+# Run the sudo command printed by PM2, then:
+pm2 save
+```
 
 ## Operations
 
-- Health: `/health`; database readiness: `/ready`; logs: `pnpm pm2 logs cms-api`.
+- Health: `/health`; database readiness: `/ready`; logs: `pm2 logs cms-api` and `pm2 logs cms-news-bot-worker`.
 - Monitor space with `df -h` and PostgreSQL/uploads with `du -sh /var/lib/postgresql /home/ubuntu/apps/cms/shared/uploads`. Configure CloudWatch alarms before production use.
 - Media URLs are immutable. Nginx supports byte ranges for video and serves media without consuming API memory.
 - Uploads are streamed with a 500 MB limit. Supported types: JPEG, PNG, GIF, WebP, MP4, WebM, and MOV.

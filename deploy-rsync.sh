@@ -19,6 +19,8 @@ ssh -i "$CMS_KEY" "$CMS_HOST" "CMS_DIR='$CMS_DIR' HEALTH_URL='$HEALTH_URL' bash 
 set -Eeuo pipefail
 cd "$CMS_DIR"
 source "$HOME/.bashrc" || true
+command -v pnpm >/dev/null || { echo 'pnpm is required; run deploy/bootstrap-ubuntu.sh first'; exit 1; }
+command -v pm2 >/dev/null || { echo 'pm2 is required; run deploy/bootstrap-ubuntu.sh first'; exit 1; }
 test -f .env.production || { echo '.env.production is missing on the server'; exit 1; }
 set -a; source .env.production; set +a
 export UPLOAD_DIR="${UPLOAD_DIR:-$CMS_DIR/shared/uploads}"
@@ -28,19 +30,23 @@ pnpm install --frozen-lockfile
 pnpm db:generate
 pnpm --filter @cms/database migrate:deploy
 pnpm build
+# Fail before process reload when a required production environment value is invalid.
+node -e "import('./apps/api/dist/config.js')"
 
 # Reload only after every install, migration, and build step succeeds.
-if pnpm pm2 describe cms-api >/dev/null 2>&1; then
-  pnpm pm2 reload ecosystem.config.cjs --update-env
-else
-  pnpm pm2 start ecosystem.config.cjs
-fi
-pnpm pm2 save
+pm2 startOrReload ecosystem.config.cjs --update-env
+pm2 save
+
+for service in cms-api cms-news-bot-worker; do
+  pid="$(pm2 pid "$service" | tr -d '[:space:]')"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { echo "$service did not start successfully (PM2 pid: ${pid:-none})"; pm2 logs "$service" --lines 100 --nostream; exit 1; }
+done
+pm2 status cms-api cms-news-bot-worker
 
 for attempt in {1..15}; do
   curl --fail --silent "$HEALTH_URL" >/dev/null && { echo 'Deployment healthy'; exit 0; }
   sleep 2
 done
-echo 'Readiness check failed. Inspect: pnpm pm2 logs cms-api'
+echo 'Readiness check failed. Inspect: pm2 logs cms-api --lines 100 and pm2 logs cms-news-bot-worker --lines 100'
 exit 1
 REMOTE
