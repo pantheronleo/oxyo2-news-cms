@@ -9,7 +9,9 @@
         "typecheck": "turbo typecheck",
         "db:generate": "pnpm --filter @cms/database generate",
         "db:migrate": "pnpm --filter @cms/database migrate",
-        "db:seed": "pnpm --filter @cms/database seed"
+        "db:seed": "pnpm --filter @cms/database seed",
+        "news-bot:verify": "pnpm --filter @cms/api news-bot:verify",
+        "news-bot:worker": "pnpm --filter @cms/api news-bot:worker:dev"
     },
     "devDependencies": {
         "turbo": "^2.5.4",

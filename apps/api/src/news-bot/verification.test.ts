@@ -1,0 +1,49 @@
+import { describe, expect, it } from 'vitest'
+import { NewsBotItemStatus } from '@cms/database'
+import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
+import { insertInlineImages, isTerminalNewsBotItem, shouldStartRun, sourceFingerprint } from './worker.js'
+import { fallbackMetadataFromMarkdown, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
+import { extractSaysArticleBody } from './adapters.js'
+
+const substantialMarkdown = `${'A'.repeat(180)}\n\n${'B'.repeat(180)}`
+
+describe('news bot verification helpers', () => {
+  it('uses the approved ten publishers without database fixtures', () => expect(verificationSources).toHaveLength(10))
+  it('canonicalizes links and removes tracking parameters', () => expect(canonicalUrl('https://example.com/a/?utm_source=x&keep=yes#top')).toBe('https://example.com/a?keep=yes'))
+  it('finds RSS links and conventional feed candidates', () => expect(findFeedUrls('<link rel="alternate" type="application/rss+xml" href="/news.xml">', 'https://example.com').some(url => url === 'https://example.com/news.xml')).toBe(true))
+  it('parses one RSS item', () => {
+    const items = parseFeed('<rss><channel><item><title>Latest</title><link>https://example.com/story</link><description><![CDATA[<p>Readable body text</p>]]></description><pubDate>Mon, 01 Jan 2026 10:00:00 GMT</pubDate></item></channel></rss>', 'https://example.com/feed')
+    expect(items).toEqual([{ title: 'Latest', url: 'https://example.com/story', body: 'Readable body text', publishedAt: 'Mon, 01 Jan 2026 10:00:00 GMT' }])
+  })
+  it('decodes numeric HTML entities in feed titles', () => expect(parseFeed('<rss><channel><item><title>Malaysia&#8217;s story</title><link>https://example.com/story</link></item></channel></rss>', 'https://example.com/feed')[0]?.title).toBe("Malaysia’s story"))
+  it('honors a catch-all robots disallow', () => expect(robotsAllows('User-agent: *\nDisallow: /private', '/private/story')).toBe(false))
+  it('allows paths outside a robots rule', () => expect(robotsAllows('User-agent: *\nDisallow: /private', '/news/story')).toBe(true))
+  it('will not schedule work while the bot is disabled', () => expect(shouldStartRun({ enabled: false, lastScheduledAt: null, intervalMinutes: 5 })).toBe(false))
+  it('uses the scheduled timestamp rather than run completion time for the next interval', () => expect(shouldStartRun({ enabled: true, lastScheduledAt: new Date('2026-07-22T12:00:00.000Z'), intervalMinutes: 5 }, new Date('2026-07-22T12:05:00.000Z').getTime())).toBe(true))
+  it('leaves failed bot items eligible for a later retry', () => { expect(isTerminalNewsBotItem(NewsBotItemStatus.FAILED)).toBe(false); expect(isTerminalNewsBotItem(NewsBotItemStatus.CREATED)).toBe(true) })
+  it('uses the local AI provider outside production', () => expect(usesLocalAi()).toBe(true))
+  it('deduplicates matching source text despite whitespace differences', () => expect(sourceFingerprint({ title: 'Breaking  News', url: 'https://example.com/a', body: 'Same  source\ntext' })).toBe(sourceFingerprint({ title: 'breaking news', url: 'https://example.com/b', body: 'same source text' })))
+  it('extracts JSON after local model thinking and prose', () => expect(parseAiJson('<think>internal reasoning</think> Here is the result: {"title":"Story","markdown":"Body"}')).toEqual({ title: 'Story', markdown: 'Body' }))
+  it('rejects incomplete rewrite payloads before a CMS draft can be created', () => expect(validateRewrittenPost({ title: 'Story', markdown: 'Body' }).missing).toEqual(expect.arrayContaining(['excerpt', 'tags', 'seoTitle', 'seoDescription', 'imagePrompt'])))
+  it('does not require an AI category in the rewrite payload', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toEqual([]))
+  it('rejects a markdown payload that contains only the mandatory source credit', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: '原文来源：[Says](https://says.com/story)。', tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toContain('substantive markdown body (at least two paragraphs and 320 characters excluding the credit)'))
+  it('does not count the final source credit as substantive article text', () => expect(substantiveMarkdownDetails(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`)).toEqual(substantiveMarkdownDetails(substantialMarkdown)))
+  it('derives complete metadata from an already valid rewrite when a provider omits metadata fields', () => {
+    const metadata = fallbackMetadataFromMarkdown(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`, 'Source headline')
+    expect(Object.values(metadata).every(value => value.length > 0)).toBe(true)
+    expect(metadata.excerpt).not.toContain('Originally reported by')
+  })
+  it('uses a contextual fallback illustration plan when a local model omits inlineImages', () => {
+    const post = validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'A market scene', imageSearchQuery: 'market' }).post
+    expect(post?.inlineImages).toEqual([{ prompt: 'A focused editorial illustration that supports this news story: A market scene', altText: 'Editorial illustration for Story', afterParagraph: 2 }])
+  })
+  it('uses the model\'s complete inline image plans when supplied', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'news scene', inlineImages: [{ prompt: 'Editorial scene', altText: 'A relevant scene', afterParagraph: 2 }] }).post?.inlineImages).toHaveLength(1))
+  it('places supporting illustrations after article paragraphs and before the credit', () => {
+    const markdown = 'Opening paragraph.\n\nSecond paragraph.\n\nOriginally reported by [Source](https://example.com/story).'
+    expect(insertInlineImages(markdown, [{ url: '/media/illustration.png', altText: 'A supporting scene', afterParagraph: 2 }])).toBe('Opening paragraph.\n\nSecond paragraph.\n\n![A supporting scene](/media/illustration.png)\n\nOriginally reported by [Source](https://example.com/story).')
+  })
+  it('extracts the full SAYS story-content block instead of its feed teaser', () => {
+    const html = '<div itemProp="articleBody"><div class="story-middle story-content read-more-overflow-active"><p>Malaysia&#8217;s economy has grown.</p><div><p>Workers are still waiting for higher wages and stronger job security.</p></div></div></div>'
+    expect(extractSaysArticleBody(html)).toBe("Malaysia’s economy has grown. Workers are still waiting for higher wages and stronger job security.")
+  })
+})

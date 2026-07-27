@@ -1,0 +1,22 @@
+.editor-language-tabs {
+  display: flex;
+  gap: 5px;
+  width: max-content;
+  margin: 0 0 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f4f7f4;
+}
+
+.editor-language-tabs button {
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 11px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.editor-language-tabs button.active { background: var(--green); color: #fff; }
+.editor-language-tabs button:disabled { cursor: not-allowed; opacity: .55; }

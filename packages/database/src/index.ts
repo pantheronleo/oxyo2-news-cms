@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client'
-export { ContentStatus, ContentType, Prisma } from '@prisma/client'
+export { ContentLanguage, ContentStatus, ContentType, NewsBotItemStatus, NewsBotLogLevel, NewsBotRunStatus, NewsBotTrigger, Prisma } from '@prisma/client'
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 export const prisma = globalForPrisma.prisma ?? new PrismaClient()

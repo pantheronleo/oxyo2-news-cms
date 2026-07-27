@@ -2,7 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Link, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowRight, CalendarDays, Clock, Search, Send, Sparkles } from 'lucide-react'
-import { fetchCategories, fetchPageBySlug, fetchPosts, type Category, type Post } from './newsApi'
+import { fetchCategories, fetchPageBySlug, fetchPostBySlug, fetchPosts, type Category, type Post } from './newsApi'
 import { categorySlug, formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml } from './utils'
 import './styles.css'
 
@@ -173,20 +173,18 @@ function Home({ categories }: { categories: Category[] }) {
 
 function Article() {
   const { slug = '' } = useParams()
+  const [params, setParams] = useSearchParams()
+  const language = params.get('lang') === 'en' ? 'en' : 'zh-CN'
   const { data, loading, error } = useAsync(async () => {
-    const article = await fetch(`/api/v1/posts/${slug}`).then(async response => {
-      const value = await response.json()
-      if (!response.ok) throw new Error(value.error?.message ?? 'Article not found')
-      return value.data as Post
-    })
+    const article = await fetchPostBySlug(slug, language)
     const related = await fetchPosts({ category: article.categoryRef?.slug || article.category, limit: 4 })
     return { article, related: related.data.filter(post => post.slug !== slug) }
-  }, [slug])
+  }, [slug, language])
 
   if (loading) return <Loading />
   if (error || !data) return <ErrorView message={error ?? 'Article not found'} />
 
-  const articleUrl = absoluteUrl(`/article/${data.article.slug}`)
+  const articleUrl = absoluteUrl(`/article/${data.article.slug}${language === 'en' ? '?lang=en' : ''}`)
   const image = resolveMediaUrl(data.article.coverMedia?.url)
 
   return (
@@ -203,6 +201,7 @@ function Article() {
         <div className="article-nav">
           <Link className="backlink" to="/">← Back to front page</Link>
           <span className="kicker">{displayCategory(data.article)}</span>
+          {data.article.availableLanguages?.includes('en') && <div className="language-switch" aria-label="Article language"><button className={language === 'zh-CN' ? 'active' : ''} onClick={() => setParams({})}>中文</button><button className={language === 'en' ? 'active' : ''} onClick={() => setParams({ lang: 'en' })}>English</button></div>}
         </div>
         <h1>{data.article.title}</h1>
         <p className="dek">{data.article.excerpt}</p>
@@ -317,7 +316,7 @@ function ArticleMeta({ post, compact = false }: { post: Post; compact?: boolean 
         <span className="footer-author">{post.authorName || 'Editorial Desk'}</span>
         <span className="footer-date"><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt)}</span>
         <span className="footer-read"><Clock />{readingTime(post.wordCount)}</span>
-        {post.sourceLabel && <span className="footer-source">{post.sourceLabel}</span>}
+        {post.sourceLabel && (post.sourceUrl ? <a className="footer-source" href={post.sourceUrl} target="_blank" rel="noreferrer noopener">Source: {post.sourceLabel}</a> : <span className="footer-source">{post.sourceLabel}</span>)}
       </div>
     )
   }
@@ -326,7 +325,7 @@ function ArticleMeta({ post, compact = false }: { post: Post; compact?: boolean 
       <span>{post.authorName || 'Editorial Desk'}</span>
       <span><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt)}</span>
       <span><Clock />{readingTime(post.wordCount)}</span>
-      {post.sourceLabel && <span>{post.sourceLabel}</span>}
+      {post.sourceLabel && (post.sourceUrl ? <a href={post.sourceUrl} target="_blank" rel="noreferrer noopener">Source: {post.sourceLabel}</a> : <span>{post.sourceLabel}</span>)}
     </p>
   )
 }

@@ -4,5 +4,6 @@ describe('content utilities',()=>{
   it('creates stable safe slugs',()=>expect(slugify(' Héllo, CMS! ')).toBe('hello-cms'))
   it('counts words',()=>expect(wordCount('One two—three')).toBe(3))
   it('sanitizes rendered markdown',()=>expect(renderMarkdown('# Safe\n<script>alert(1)</script>')).not.toContain('<script>'))
+  it('keeps generated media references in article markdown',()=>expect(renderMarkdown('![Editorial illustration](/media/2026/07/image.png)')).toContain('src="/media/2026/07/image.png"'))
   it('rejects past schedules',()=>expect(()=>normalizeStatus('SCHEDULED','2020-01-01')).toThrow())
 })

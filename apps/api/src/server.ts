@@ -15,6 +15,8 @@ import { contentRoutes, publicRoutes } from './routes/content.js'
 import { mediaRoutes, serveMedia } from './routes/media.js'
 import { categoryRoutes, publicCategoryRoutes } from './routes/categories.js'
 import { feedRoutes } from './routes/feeds.js'
+import { newsBotRoutes } from './routes/news-bot.js'
+import { startNewsBotScheduler, stopNewsBotScheduler } from './news-bot/worker.js'
 
 export async function buildApp() {
   const app=Fastify({logger:{level:config.NODE_ENV==='production'?'info':'debug'},bodyLimit:2*1024*1024,trustProxy:true})
@@ -26,11 +28,11 @@ export async function buildApp() {
   const csrfExemptAdminPaths = new Set(['/auth/login','/auth/forgot-password','/auth/reset-password','/api/admin/auth/login','/api/admin/auth/forgot-password','/api/admin/auth/reset-password'])
   await app.register(async admin=>{
     admin.addHook('preHandler',(req,reply,done)=>{const path = req.url.split('?')[0] ?? ''; if(['GET','HEAD','OPTIONS'].includes(req.method)||csrfExemptAdminPaths.has(path)) return done(); admin.csrfProtection(req,reply,done)})
-    await admin.register(authRoutes,{prefix:'/auth'}); await admin.register(contentRoutes,{prefix:'/content'}); await admin.register(mediaRoutes,{prefix:'/media'}); await admin.register(categoryRoutes,{prefix:'/categories'})
+    await admin.register(authRoutes,{prefix:'/auth'}); await admin.register(contentRoutes,{prefix:'/content'}); await admin.register(mediaRoutes,{prefix:'/media'}); await admin.register(categoryRoutes,{prefix:'/categories'}); await admin.register(newsBotRoutes,{prefix:'/news-bot'})
     admin.get('/dashboard',{preHandler:requireAdmin},async()=>{const [drafts,published,scheduled,media]=await prisma.$transaction([prisma.content.count({where:{status:'DRAFT'}}),prisma.content.count({where:{status:'PUBLISHED'}}),prisma.content.count({where:{status:'SCHEDULED'}}),prisma.media.count()]); return{data:{drafts,published,scheduled,media}}})
   },{prefix:'/api/admin'})
   await app.register(publicRoutes,{prefix:'/api/v1'}); await app.register(publicCategoryRoutes,{prefix:'/api/v1'}); await app.register(feedRoutes); await serveMedia(app)
   app.setErrorHandler((error,_req,reply)=>{app.log.error(error); const status=(error as any).statusCode??500; reply.code(status).send({error:{code:status===500?'INTERNAL_ERROR':'REQUEST_ERROR',message:status===500?'An unexpected error occurred':error instanceof Error?error.message:'Request failed'}})})
-  app.addHook('onClose',()=>prisma.$disconnect()); return app
+  app.addHook('onClose',()=>{stopNewsBotScheduler();return prisma.$disconnect()}); return app
 }
-if(process.env.NODE_ENV!=='test'){const app=await buildApp(); const shutdown=async()=>{await app.close();process.exit(0)}; process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown); await app.listen({port:config.PORT,host:config.HOST})}
+if(process.env.NODE_ENV!=='test'){const app=await buildApp(); const shutdown=async()=>{await app.close();process.exit(0)}; process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown); await app.listen({port:config.PORT,host:config.HOST}); await startNewsBotScheduler()}

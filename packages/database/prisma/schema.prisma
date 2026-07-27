@@ -20,6 +20,33 @@ enum ResetTokenStatus {
   ACTIVE
   USED
 }
+enum NewsBotRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+enum NewsBotTrigger {
+  SCHEDULED
+  MANUAL
+}
+enum NewsBotItemStatus {
+  PENDING
+  CREATED
+  SKIPPED
+  FAILED
+}
+enum NewsBotLogLevel {
+  INFO
+  WARN
+  ERROR
+}
+enum ContentLanguage {
+  ZH_CN
+  EN
+}
 
 model User {
   id String @id @default(cuid())
@@ -41,6 +68,7 @@ model Content {
   category String @default("General")
   authorName String @default("Editorial Desk")
   sourceLabel String?
+  sourceUrl String?
   isFeatured Boolean @default(false)
   categoryId String?
   categoryRef Category? @relation("ContentCategory", fields: [categoryId], references: [id], onDelete: SetNull)
@@ -49,6 +77,9 @@ model Content {
   wordCount Int @default(0)
   coverMediaId String?
   coverMedia Media? @relation("CoverMedia", fields: [coverMediaId], references: [id], onDelete: SetNull)
+  newsBotItem NewsBotItem?
+  translations ContentTranslation[]
+  visualNeedsReview Boolean @default(false)
   tags String[] @default([])
   seoTitle String?
   seoDescription String?
@@ -62,6 +93,112 @@ model Content {
   @@index([type, categoryId, status, publishedAt])
   @@index([type, isFeatured, status, publishedAt])
   @@index([updatedAt])
+}
+
+model ContentTranslation {
+  id String @id @default(cuid())
+  contentId String
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  language ContentLanguage
+  title String
+  excerpt String @default("")
+  markdown String @default("") @db.Text
+  html String @default("") @db.Text
+  wordCount Int @default(0)
+  seoTitle String?
+  seoDescription String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([contentId, language])
+  @@index([language])
+}
+
+model NewsBotSettings {
+  id String @id @default("default")
+  enabled Boolean @default(false)
+  intervalMinutes Int @default(120)
+  articleLimit Int?
+  lastRunAt DateTime?
+  lastScheduledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model NewsBotSource {
+  id String @id @default(cuid())
+  name String @unique
+  feedUrl String
+  sourceLabel String
+  category String @default("General")
+  categoryId String?
+  credentialEnvKey String?
+  allowsSourceImageReference Boolean @default(false)
+  sourceImagePermissionUrl String?
+  isEnabled Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  items NewsBotItem[]
+  logs NewsBotLog[]
+  @@index([isEnabled])
+}
+
+model NewsBotRun {
+  id String @id @default(cuid())
+  trigger NewsBotTrigger
+  status NewsBotRunStatus @default(QUEUED)
+  sourceCount Int @default(0)
+  processedCount Int @default(0)
+  createdCount Int @default(0)
+  skippedCount Int @default(0)
+  failedCount Int @default(0)
+  error String?
+  startedAt DateTime?
+  finishedAt DateTime?
+  createdAt DateTime @default(now())
+  items NewsBotItem[]
+  logs NewsBotLog[]
+  @@index([status, createdAt])
+}
+
+model NewsBotItem {
+  id String @id @default(cuid())
+  sourceUrl String @unique
+  sourceFingerprint String? @unique
+  sourceTitle String
+  sourceExcerpt String? @db.Text
+  sourcePublishedAt DateTime?
+  sourceImageUrl String?
+  status NewsBotItemStatus @default(PENDING)
+  error String?
+  retryCount Int @default(0)
+  lastFailureAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sourceId String
+  source NewsBotSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  runId String?
+  run NewsBotRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  contentId String? @unique
+  content Content? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+  logs NewsBotLog[]
+  @@index([sourceId, status])
+}
+
+model NewsBotLog {
+  id String @id @default(cuid())
+  level NewsBotLogLevel @default(INFO)
+  stage String
+  message String @db.Text
+  context Json?
+  createdAt DateTime @default(now())
+  runId String
+  run NewsBotRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceId String?
+  source NewsBotSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  itemId String?
+  item NewsBotItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  @@index([runId, createdAt])
+  @@index([itemId, createdAt])
 }
 
 model Category {
@@ -93,6 +230,12 @@ model Media {
   duration Float?
   altText String @default("")
   caption String @default("")
+  provider String?
+  providerAssetId String?
+  attributionName String?
+  attributionUrl String?
+  license String?
+  visualOrigin String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   covers Content[] @relation("CoverMedia")

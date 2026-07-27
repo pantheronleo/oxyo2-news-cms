@@ -1,6 +1,6 @@
 import{describe,expect,it}from'vitest'
 import{ContentType}from'@cms/database'
-import{contentSearchFilters,publicContentWhere}from'./content.js'
+import{contentSearchFilters,localizeContent,publicContentWhere}from'./content.js'
 
 describe('content route filters',()=>{
   it('builds category, featured, and search filters',()=>{
@@ -22,5 +22,10 @@ describe('content route filters',()=>{
       tags:{has:'launch'},
       isFeatured:false
     })
+  })
+  it('returns Simplified Chinese by default and a linked English variant on request',()=>{
+    const item={id:'story',title:'中文标题',excerpt:'中文摘要',markdown:'中文内容',html:'<p>中文内容</p>',wordCount:4,translations:[{language:'EN',title:'English title',excerpt:'English excerpt',markdown:'English body',html:'<p>English body</p>',wordCount:2}]}
+    expect(localizeContent(item,undefined)).toMatchObject({title:'中文标题',language:'zh-CN',availableLanguages:['zh-CN','en']})
+    expect(localizeContent(item,'en')).toMatchObject({title:'English title',language:'en',availableLanguages:['zh-CN','en']})
   })
 })
