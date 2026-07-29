@@ -4,25 +4,25 @@
 
 ## Primary reader routes
 
-- Home: https://www.thepaperleaf.com/
-- About: https://www.thepaperleaf.com/page/about-thepaperleaf
-- Search: https://www.thepaperleaf.com/search
-- Sitemap: https://www.thepaperleaf.com/sitemap.xml
-- RSS feed: https://www.thepaperleaf.com/rss.xml
+- [Home](https://www.thepaperleaf.com/): Latest stories, featured editorial picks, topic navigation, and subscription callout.
+- [About](https://www.thepaperleaf.com/page/about-thepaperleaf): Publication purpose, editorial approach, and reader promise.
+- [Search](https://www.thepaperleaf.com/search): Reader-facing story search.
+- [Sitemap](https://www.thepaperleaf.com/sitemap.xml): Machine-readable index of public pages, categories, and articles.
+- [RSS feed](https://www.thepaperleaf.com/rss.xml): Latest published stories in RSS format.
 
 ## Topic routes
 
-- Business: https://www.thepaperleaf.com/category/business
-- Technology: https://www.thepaperleaf.com/category/technology
-- Culture: https://www.thepaperleaf.com/category/culture
-- World: https://www.thepaperleaf.com/category/world
-- Science: https://www.thepaperleaf.com/category/science
-- Sport: https://www.thepaperleaf.com/category/sport
+- [Business](https://www.thepaperleaf.com/category/business): Markets, work, companies, and economic signals.
+- [Technology](https://www.thepaperleaf.com/category/technology): Platforms, devices, AI, research tools, and digital culture.
+- [Culture](https://www.thepaperleaf.com/category/culture): Media, arts, design, entertainment, and publishing shifts.
+- [World](https://www.thepaperleaf.com/category/world): International developments and global context.
+- [Science](https://www.thepaperleaf.com/category/science): Climate, health, discovery, space, and research explainers.
+- [Sport](https://www.thepaperleaf.com/category/sport): Competition, analysis, athletes, events, and sport systems.
 
 ## Public data
 
-- Latest published stories: https://www.thepaperleaf.com/api/v1/posts
-- Public categories: https://www.thepaperleaf.com/api/v1/categories
+- [Latest published stories](https://www.thepaperleaf.com/api/v1/posts): Public JSON feed of published articles.
+- [Public categories](https://www.thepaperleaf.com/api/v1/categories): Public JSON list of active topic categories.
 
 ## Use guidance
 

@@ -22,25 +22,25 @@ export async function feedRoutes(app: FastifyInstance) {
 
 ## Primary reader routes
 
-- Home: ${siteUrl('/')}
-- About: ${siteUrl('/page/about-thepaperleaf')}
-- Search: ${siteUrl('/search')}
-- Sitemap: ${siteUrl('/sitemap.xml')}
-- RSS feed: ${siteUrl('/rss.xml')}
+- [Home](${siteUrl('/')}): Latest stories, featured editorial picks, topic navigation, and subscription callout.
+- [About](${siteUrl('/page/about-thepaperleaf')}): Publication purpose, editorial approach, and reader promise.
+- [Search](${siteUrl('/search')}): Reader-facing story search.
+- [Sitemap](${siteUrl('/sitemap.xml')}): Machine-readable index of public pages, categories, and articles.
+- [RSS feed](${siteUrl('/rss.xml')}): Latest published stories in RSS format.
 
 ## Topic routes
 
-- Business: ${siteUrl('/category/business')}
-- Technology: ${siteUrl('/category/technology')}
-- Culture: ${siteUrl('/category/culture')}
-- World: ${siteUrl('/category/world')}
-- Science: ${siteUrl('/category/science')}
-- Sport: ${siteUrl('/category/sport')}
+- [Business](${siteUrl('/category/business')}): Markets, work, companies, and economic signals.
+- [Technology](${siteUrl('/category/technology')}): Platforms, devices, AI, research tools, and digital culture.
+- [Culture](${siteUrl('/category/culture')}): Media, arts, design, entertainment, and publishing shifts.
+- [World](${siteUrl('/category/world')}): International developments and global context.
+- [Science](${siteUrl('/category/science')}): Climate, health, discovery, space, and research explainers.
+- [Sport](${siteUrl('/category/sport')}): Competition, analysis, athletes, events, and sport systems.
 
 ## Public data
 
-- Latest published stories: ${siteUrl('/api/v1/posts')}
-- Public categories: ${siteUrl('/api/v1/categories')}
+- [Latest published stories](${siteUrl('/api/v1/posts')}): Public JSON feed of published articles.
+- [Public categories](${siteUrl('/api/v1/categories')}): Public JSON list of active topic categories.
 
 ## Use guidance
 
