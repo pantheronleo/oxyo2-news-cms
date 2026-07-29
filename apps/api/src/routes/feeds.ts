@@ -14,6 +14,40 @@ export async function feedRoutes(app: FastifyInstance) {
     return `User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\n`
   })
 
+  app.get('/llms.txt', async (_req, reply) => {
+    reply.type('text/plain; charset=utf-8').header('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
+    return `# ThePaperLeaf
+
+> ThePaperLeaf is an independent magazine-style news publication focused on clear, visual, and context-rich reporting for curious readers.
+
+## Primary reader routes
+
+- Home: ${siteUrl('/')}
+- About: ${siteUrl('/page/about-thepaperleaf')}
+- Search: ${siteUrl('/search')}
+- Sitemap: ${siteUrl('/sitemap.xml')}
+- RSS feed: ${siteUrl('/rss.xml')}
+
+## Topic routes
+
+- Business: ${siteUrl('/category/business')}
+- Technology: ${siteUrl('/category/technology')}
+- Culture: ${siteUrl('/category/culture')}
+- World: ${siteUrl('/category/world')}
+- Science: ${siteUrl('/category/science')}
+- Sport: ${siteUrl('/category/sport')}
+
+## Public data
+
+- Latest published stories: ${siteUrl('/api/v1/posts')}
+- Public categories: ${siteUrl('/api/v1/categories')}
+
+## Use guidance
+
+Use story title, canonical article URL, publication date, author, and source label when citing ThePaperLeaf. Public article pages and feeds are intended for reader discovery. Search and category pages are navigational.
+`
+  })
+
   app.get('/sitemap.xml', async (_req, reply) => {
     const [posts, pages, categories] = await Promise.all([
       prisma.content.findMany({ where: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: { lte: new Date() } }, select: { slug: true, updatedAt: true, publishedAt: true }, orderBy: { publishedAt: 'desc' }, take: 1000 }),
@@ -38,7 +72,7 @@ export async function feedRoutes(app: FastifyInstance) {
       take: 50
     })
     reply.type('application/rss+xml; charset=utf-8').header('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">\n  <channel>\n    <title>Globaly Magazine News</title>\n    <link>${escapeXml(siteUrl('/'))}</link>\n    <description>Independent magazine-style news, analysis, and editorial explainers.</description>\n    <language>en</language>\n    <atom:link href="${escapeXml(siteUrl('/rss.xml'))}" rel="self" type="application/rss+xml" />\n${posts.map(post => {
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">\n  <channel>\n    <title>ThePaperLeaf Magazine News</title>\n    <link>${escapeXml(siteUrl('/'))}</link>\n    <description>Independent magazine-style news, analysis, and editorial explainers.</description>\n    <language>en</language>\n    <atom:link href="${escapeXml(siteUrl('/rss.xml'))}" rel="self" type="application/rss+xml" />\n${posts.map(post => {
       const image = post.coverMedia?.url ? new URL(post.coverMedia.url, config.PUBLIC_BASE_URL).toString() : ''
       return `    <item>\n      <title>${escapeXml(post.title)}</title>\n      <link>${escapeXml(articleUrl(post.slug))}</link>\n      <guid isPermaLink="true">${escapeXml(articleUrl(post.slug))}</guid>\n      <description>${escapeXml(post.excerpt || post.html.replace(/<[^>]+>/g, ' ').slice(0, 220))}</description>\n      <pubDate>${(post.publishedAt || post.updatedAt).toUTCString()}</pubDate>\n      <author>${escapeXml(post.authorName || 'Editorial Desk')}</author>\n      <category>${escapeXml(post.categoryRef?.name || post.category || 'General')}</category>${image ? `\n      <media:content url="${escapeXml(image)}" medium="image" />` : ''}\n    </item>`
     }).join('\n')}\n  </channel>\n</rss>\n`

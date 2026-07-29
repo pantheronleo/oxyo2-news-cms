@@ -39,7 +39,7 @@ export function removeMeta(name: string, property = false) {
   document.head.querySelector<HTMLMetaElement>(`meta[${property ? 'property' : 'name'}="${name}"]`)?.remove()
 }
 
-export function setSeo({ title, description, image, canonical, type = 'website', noIndex = false, siteName = 'Globaly' }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean; siteName?: string }) {
+export function setSeo({ title, description, image, canonical, type = 'website', noIndex = false, siteName = 'ThePaperLeaf' }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean; siteName?: string }) {
   const cleanDescription = description.slice(0, 220)
   const url = canonical || (typeof window !== 'undefined' ? window.location.href : '')
   const absoluteImage = absoluteMediaUrl(image)

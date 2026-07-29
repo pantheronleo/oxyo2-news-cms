@@ -1,0 +1,29 @@
+# ThePaperLeaf
+
+> ThePaperLeaf is an independent magazine-style news publication focused on clear, visual, and context-rich reporting for curious readers.
+
+## Primary reader routes
+
+- Home: https://www.thepaperleaf.com/
+- About: https://www.thepaperleaf.com/page/about-thepaperleaf
+- Search: https://www.thepaperleaf.com/search
+- Sitemap: https://www.thepaperleaf.com/sitemap.xml
+- RSS feed: https://www.thepaperleaf.com/rss.xml
+
+## Topic routes
+
+- Business: https://www.thepaperleaf.com/category/business
+- Technology: https://www.thepaperleaf.com/category/technology
+- Culture: https://www.thepaperleaf.com/category/culture
+- World: https://www.thepaperleaf.com/category/world
+- Science: https://www.thepaperleaf.com/category/science
+- Sport: https://www.thepaperleaf.com/category/sport
+
+## Public data
+
+- Latest published stories: https://www.thepaperleaf.com/api/v1/posts
+- Public categories: https://www.thepaperleaf.com/api/v1/categories
+
+## Use guidance
+
+Use story title, canonical article URL, publication date, author, and source label when citing ThePaperLeaf. Public article pages and feeds are intended for reader discovery. Search and category pages are navigational.

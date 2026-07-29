@@ -5,7 +5,8 @@ import { normalizeStatus, renderMarkdown, slugify, wordCount } from '../lib/cont
 
 const types = { posts: ContentType.POST, pages: ContentType.PAGE }
 const translationSelect = { id: true, language: true, title: true, excerpt: true, markdown: true, html: true, wordCount: true, seoTitle: true, seoDescription: true, createdAt: true, updatedAt: true }
-const select = { id: true, type: true, status: true, title: true, slug: true, excerpt: true, category: true, categoryId: true, categoryRef: { select: { id: true, name: true, slug: true, color: true } }, authorName: true, sourceLabel: true, sourceUrl: true, isFeatured: true, markdown: true, html: true, wordCount: true, coverMediaId: true, tags: true, seoTitle: true, seoDescription: true, publishedAt: true, scheduledAt: true, createdAt: true, updatedAt: true, visualNeedsReview: true, translations: { select: translationSelect }, coverMedia: { select: { id: true, url: true, altText: true, width: true, height: true } } }
+const mediaSelect = { id: true, url: true, altText: true, width: true, height: true, provider: true, providerAssetId: true, attributionName: true, attributionUrl: true, license: true, visualOrigin: true, caption: true }
+const select = { id: true, type: true, status: true, title: true, slug: true, excerpt: true, category: true, categoryId: true, categoryRef: { select: { id: true, name: true, slug: true, color: true } }, authorName: true, sourceLabel: true, sourceUrl: true, isFeatured: true, markdown: true, html: true, wordCount: true, coverMediaId: true, tags: true, seoTitle: true, seoDescription: true, publishedAt: true, scheduledAt: true, createdAt: true, updatedAt: true, visualNeedsReview: true, translations: { select: translationSelect }, coverMedia: { select: mediaSelect } }
 
 export function contentSearchFilters(q: Record<string,string>) {
   const and:any[]=[]
@@ -31,6 +32,25 @@ export function localizeContent(item: any, language: string | undefined) {
   const isEnglish = language === 'en' && english
   const { translations, ...base } = item
   return { ...base, ...(isEnglish ? english : {}), language: isEnglish ? 'en' : 'zh-CN', availableLanguages: ['zh-CN', ...(english ? ['en'] : [])] }
+}
+
+const imageUrlsFromMarkdown = (markdown: string) => [...markdown.matchAll(/!\[[^\]]*\]\(([^\s)]+)/g)].map(match => match[1]!).filter(Boolean)
+const stockProviderFor = (media: any) => {
+  const provider = String(media.provider || '').toLowerCase()
+  if (['pexels', 'pixabay', 'unsplash'].includes(provider)) return media.provider
+  if (String(media.url || '').includes('images.unsplash.com')) return 'Unsplash'
+  return null
+}
+const isStockMedia = (media: any) => Boolean(stockProviderFor(media))
+const legacyStockCredit = (url: string) => url.includes('images.unsplash.com') ? { id: url, url, altText: '', provider: 'Unsplash', attributionName: null, attributionUrl: 'https://unsplash.com/?utm_source=thepaperleaf&utm_medium=referral', license: 'Unsplash License', visualOrigin: 'UNSPLASH', caption: 'Photo via Unsplash.' } : null
+
+async function withImageCredits(items: any[], language?: string) {
+  const localized = items.map(item => localizeContent(item, language))
+  const urls = [...new Set(localized.flatMap(item => [item.coverMedia?.url, ...imageUrlsFromMarkdown(item.markdown)]).filter(Boolean))]
+  if (!urls.length) return localized.map(item => ({ ...item, imageCredits: [] }))
+  const media = await prisma.media.findMany({ where: { url: { in: urls } }, select: mediaSelect })
+  const byUrl = new Map(media.filter(isStockMedia).map(item => [item.url, item]))
+  return localized.map(item => ({ ...item, imageCredits: [...new Set([item.coverMedia?.url, ...imageUrlsFromMarkdown(item.markdown)])].map(url => byUrl.get(url) || legacyStockCredit(url)).filter(Boolean) }))
 }
 
 function translationData(body: any) {
@@ -69,8 +89,8 @@ export async function publicRoutes(app: FastifyInstance) {
     app.get(`/${path}`, async (req, reply) => {
       reply.header('Cache-Control','public, max-age=60, stale-while-revalidate=300'); const q = req.query as Record<string,string>; const page = Math.max(1,Number(q.page)||1); const limit = Math.min(50,Math.max(1,Number(q.limit)||10)); const now = new Date()
       await prisma.content.updateMany({ where: { type, status: 'SCHEDULED', scheduledAt: { lte: now } }, data: { status: 'PUBLISHED', publishedAt: now } })
-      const where: any = publicContentWhere(type, q, now); const [items,total] = await prisma.$transaction([prisma.content.findMany({ where, select, orderBy: [{ isFeatured: 'desc' }, { publishedAt: 'desc' }] as any, skip:(page-1)*limit,take:limit }),prisma.content.count({where})]); return { data:items.map(item => localizeContent(item, q.lang)),meta:{page,limit,total,pages:Math.ceil(total/limit)} }
+      const where: any = publicContentWhere(type, q, now); const [items,total] = await prisma.$transaction([prisma.content.findMany({ where, select, orderBy: [{ isFeatured: 'desc' }, { publishedAt: 'desc' }] as any, skip:(page-1)*limit,take:limit }),prisma.content.count({where})]); return { data:await withImageCredits(items, q.lang),meta:{page,limit,total,pages:Math.ceil(total/limit)} }
     })
-    app.get(`/${path}/:slug`, async (req, reply) => { reply.header('Cache-Control','public, max-age=60, stale-while-revalidate=300'); const item = await prisma.content.findUnique({ where: { type_slug: { type, slug: (req.params as any).slug } }, select }); return item?.status === 'PUBLISHED' && item.publishedAt && item.publishedAt <= new Date() ? { data: localizeContent(item, (req.query as any).lang) } : reply.code(404).send({error:{code:'NOT_FOUND',message:'Content not found'}}) })
+    app.get(`/${path}/:slug`, async (req, reply) => { reply.header('Cache-Control','public, max-age=60, stale-while-revalidate=300'); const item = await prisma.content.findUnique({ where: { type_slug: { type, slug: (req.params as any).slug } }, select }); return item?.status === 'PUBLISHED' && item.publishedAt && item.publishedAt <= new Date() ? { data: (await withImageCredits([item], (req.query as any).lang))[0] } : reply.code(404).send({error:{code:'NOT_FOUND',message:'Content not found'}}) })
   }
 }

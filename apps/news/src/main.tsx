@@ -6,8 +6,9 @@ import { fetchCategories, fetchPageBySlug, fetchPostBySlug, fetchPosts, type Cat
 import { categorySlug, formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml } from './utils'
 import './styles.css'
 
-const siteName = 'Globaly'
+const siteName = 'ThePaperLeaf'
 const siteDescription = 'Independent magazine-style news, analysis, and editorial explainers for curious readers.'
+const unsplashHosts = new Set(['images.unsplash.com', 'plus.unsplash.com'])
 const fallbackCategories: Category[] = ['Business', 'Technology', 'Culture', 'World', 'Science', 'Sport'].map((name, i) => ({
   id: name,
   name,
@@ -21,27 +22,27 @@ const aboutFallback: Post = {
   id: 'about-fallback',
   type: 'PAGE',
   status: 'PUBLISHED',
-  title: 'About Globaly',
-  slug: 'about-globaly',
-  excerpt: 'Globaly is an independent magazine-style publication for clear, visual, and context-rich reporting.',
+  title: 'About ThePaperLeaf',
+  slug: 'about-thepaperleaf',
+  excerpt: 'ThePaperLeaf is an independent magazine-style publication for clear, visual, and context-rich reporting.',
   category: 'Page',
   authorName: 'Editorial Desk',
-  sourceLabel: 'Globaly',
+  sourceLabel: 'ThePaperLeaf',
   isFeatured: false,
   markdown: '',
   html: `
-    <p>Globaly is an independent magazine-style publication built for readers who want clarity without losing depth. We cover business, technology, culture, world affairs, science, and sport through concise reporting, visual storytelling, and practical context.</p>
+    <p>ThePaperLeaf is an independent magazine-style publication built for readers who want clarity without losing depth. We cover business, technology, culture, world affairs, science, and sport through concise reporting, visual storytelling, and practical context.</p>
     <h2>What this publication is for</h2>
     <p>Our goal is to make fast-moving stories easier to understand. Each section is shaped around useful signals: what changed, why it matters, and what readers should watch next.</p>
     <h2>Editorial approach</h2>
     <ul><li>We prioritize context over noise and explain the forces behind each headline.</li><li>We use strong visuals, clear categories, and readable summaries to help readers move quickly.</li><li>We treat archives as living context, so stories remain useful after the first news cycle.</li><li>We separate reporting, analysis, and source labels so readers can understand what they are reading.</li></ul>
     <h2>Our promise</h2>
-    <p>Globaly is designed to feel calm, direct, and modern: a place for sharp daily reading, deeper weekend browsing, and discovery across topics that shape public life.</p>
+    <p>ThePaperLeaf is designed to feel calm, direct, and modern: a place for sharp daily reading, deeper weekend browsing, and discovery across topics that shape public life.</p>
   `,
   wordCount: 190,
-  tags: ['about', 'globaly', 'news'],
-  seoTitle: 'About Globaly — Independent magazine news',
-  seoDescription: 'Learn about Globaly, an independent magazine-style publication for clear, visual, and context-rich reporting.',
+  tags: ['about', 'thepaperleaf', 'news'],
+  seoTitle: 'About ThePaperLeaf — Independent magazine news',
+  seoDescription: 'Learn about ThePaperLeaf, an independent magazine-style publication for clear, visual, and context-rich reporting.',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString()
 }
@@ -67,10 +68,10 @@ function Layout() {
   return (
     <>
       <header className="site-header">
-        <Link to="/" className="logo" aria-label="Globaly home">Globaly<span>.</span></Link>
+        <Link to="/" className="logo" aria-label="ThePaperLeaf home">ThePaperLeaf<span>.</span></Link>
         <nav aria-label="Primary navigation">
           {categories.map(category => <Link key={category.id} to={`/category/${category.slug}`}>{category.name}</Link>)}
-          <Link to="/page/about-globaly">About</Link>
+          <Link to="/page/about-thepaperleaf">About</Link>
         </nav>
         <form className="top-search" action="/search" role="search">
           <Search />
@@ -126,13 +127,13 @@ function Home({ categories }: { categories: Category[] }) {
   return (
     <main>
       <Seo
-        title="Globaly — Magazine News"
+        title="ThePaperLeaf — Magazine News"
         description={preview?.excerpt || siteDescription}
         image={resolveMediaUrl(preview?.coverMedia?.url)}
         canonical={homeUrl}
         type="website"
       />
-      <JsonLd id="globaly-website" data={{ '@context': 'https://schema.org', '@type': 'WebSite', name: siteName, url: homeUrl, description: siteDescription, potentialAction: { '@type': 'SearchAction', target: `${homeUrl}search?q={search_term_string}`, 'query-input': 'required name=search_term_string' } }} />
+      <JsonLd id="thepaperleaf-website" data={{ '@context': 'https://schema.org', '@type': 'WebSite', name: siteName, url: homeUrl, description: siteDescription, potentialAction: { '@type': 'SearchAction', target: `${homeUrl}search?q={search_term_string}`, 'query-input': 'required name=search_term_string' } }} />
       <section className="hero-shell">
         <div className="hero-copy">
           <span className="kicker">Today’s pick</span>
@@ -158,7 +159,7 @@ function Home({ categories }: { categories: Category[] }) {
         <div>
           <span className="kicker">Explore</span>
           <h2>See related topics</h2>
-          <p>Follow your favorite beats through category pages curated by the Globaly desk.</p>
+          <p>Follow your favorite beats through category pages curated by the ThePaperLeaf desk.</p>
         </div>
         {categories.slice(0, 6).map((category, i) => (
           <Link className={`topic t${i}`} style={{ '--topic': category.color, '--topic-image': `url(${topicImage(category.slug)})` } as React.CSSProperties} key={category.id} to={`/category/${category.slug}`}>{category.name}<ArrowRight /></Link>
@@ -190,7 +191,7 @@ function Article() {
   return (
     <main className="article-page">
       <Seo
-        title={`${data.article.seoTitle || data.article.title} — Globaly`}
+        title={`${data.article.seoTitle || data.article.title} — ThePaperLeaf`}
         description={data.article.seoDescription || data.article.excerpt || stripHtml(data.article.html).slice(0, 160)}
         image={image}
         canonical={articleUrl}
@@ -206,8 +207,9 @@ function Article() {
         <h1>{data.article.title}</h1>
         <p className="dek">{data.article.excerpt}</p>
         <ArticleMeta post={data.article} />
-        <ArticleImage post={data.article} big />
+        <ArticleImage post={data.article} big showCredit priority sizes="(max-width: 760px) 100vw, 820px" />
         <div className="article-body" dangerouslySetInnerHTML={{ __html: data.article.html }} />
+        <ImageCredits credits={data.article.imageCredits} />
       </article>
       <aside className="related">
         <h3>Related stories</h3>
@@ -223,14 +225,14 @@ function CategoryPage({ categories }: { categories: Category[] }) {
   const readable = match?.name ?? category.replaceAll('-', ' ')
   const query = match?.slug ?? category
   const { data, loading, error } = useAsync(() => fetchPosts({ category: query, limit: 18 }), [query])
-  return <Listing title={readable} eyebrow="Category" posts={data?.data} loading={loading} error={error} description={match?.description || `Latest ${readable.toLowerCase()} coverage from Globaly.`} />
+  return <Listing title={readable} eyebrow="Category" posts={data?.data} loading={loading} error={error} description={match?.description || `Latest ${readable.toLowerCase()} coverage from ThePaperLeaf.`} />
 }
 
 function SearchPage() {
   const [params] = useSearchParams()
   const q = params.get('q') ?? ''
   const { data, loading, error } = useAsync(() => fetchPosts({ search: q, limit: 18 }), [q])
-  return <Listing title={q ? `Search: ${q}` : 'Search the newsroom'} eyebrow="Results" posts={data?.data} loading={loading} error={error} noIndex={!q} description={q ? `Search results for ${q} on Globaly.` : 'Search the Globaly newsroom.'} />
+  return <Listing title={q ? `Search: ${q}` : 'Search the newsroom'} eyebrow="Results" posts={data?.data} loading={loading} error={error} noIndex={!q} description={q ? `Search results for ${q} on ThePaperLeaf.` : 'Search the ThePaperLeaf newsroom.'} />
 }
 
 function StaticPage() {
@@ -240,7 +242,7 @@ function StaticPage() {
     try {
       return await fetchPageBySlug(slug)
     } catch (err) {
-      if (slug === 'about-globaly') return aboutFallback
+      if (slug === 'about-thepaperleaf') return aboutFallback
       throw err
     }
   }, [slug])
@@ -253,7 +255,7 @@ function StaticPage() {
 
   return (
     <main className={`static-page ${isAboutPage(data.slug) ? 'about-page' : ''}`}>
-      <Seo title={`${data.seoTitle || data.title} — Globaly`} description={description} image={resolveMediaUrl(data.coverMedia?.url)} canonical={pageUrl} type="article" />
+      <Seo title={`${data.seoTitle || data.title} — ThePaperLeaf`} description={description} image={resolveMediaUrl(data.coverMedia?.url)} canonical={pageUrl} type="article" />
       <JsonLd id={`page-${data.slug}`} data={{ '@context': 'https://schema.org', '@type': 'AboutPage', name: data.title, url: pageUrl, description, publisher: publisherJsonLd() }} />
       <section className="static-hero">
         <span className="kicker">Page</span>
@@ -271,7 +273,7 @@ function Listing({ title, eyebrow, posts, loading, error, description, noIndex =
   if (error) return <ErrorView message={error} />
   return (
     <main>
-      <Seo title={`${title} — Globaly`} description={description || `Latest ${title.toLowerCase()} stories from Globaly.`} image={resolveMediaUrl(posts?.[0]?.coverMedia?.url)} canonical={absoluteUrl(location.pathname + location.search)} noIndex={noIndex} />
+      <Seo title={`${title} — ThePaperLeaf`} description={description || `Latest ${title.toLowerCase()} stories from ThePaperLeaf.`} image={resolveMediaUrl(posts?.[0]?.coverMedia?.url)} canonical={absoluteUrl(location.pathname + location.search)} noIndex={noIndex} />
       <SectionTitle eyebrow={eyebrow} title={title} />
       <div className="latest-grid">{posts?.length ? posts.map(post => <ArticleCard key={post.id} post={post} />) : <EmptyCopy />}</div>
     </main>
@@ -281,7 +283,7 @@ function Listing({ title, eyebrow, posts, loading, error, description, noIndex =
 function ArticleCard({ post, featured = false }: { post: Post; featured?: boolean }) {
   return (
     <Link className={`card ${featured ? 'featured-card' : ''}`} to={`/article/${post.slug}`} aria-label={`Read ${post.title}`}>
-      <ArticleImage post={post} />
+      <ArticleImage post={post} sizes={featured ? '(max-width: 760px) 100vw, (max-width: 1080px) 50vw, 33vw' : '(max-width: 760px) 100vw, (max-width: 1080px) 50vw, 25vw'} />
       <span className="kicker">{displayCategory(post)}</span>
       <h3>{post.title}</h3>
       <p>{post.excerpt || stripHtml(post.html).slice(0, 120)}</p>
@@ -293,20 +295,84 @@ function ArticleCard({ post, featured = false }: { post: Post; featured?: boolea
 function MiniCard({ post, active = false, onPreview }: { post: Post; active?: boolean; onPreview?: () => void }) {
   return (
     <Link className={`mini-card ${active ? 'active' : ''}`} to={`/article/${post.slug}`} onMouseEnter={onPreview} onFocus={onPreview} aria-current={active ? 'true' : undefined}>
-      <ArticleImage post={post} />
+      <ArticleImage post={post} sizes="92px" />
       <span><small>{displayCategory(post)}</small><b>{post.title}</b></span>
     </Link>
   )
 }
 
-function ArticleImage({ post, big = false }: { post?: Post; big?: boolean }) {
+function ArticleImage({ post, big = false, showCredit = false, priority = false, sizes }: { post?: Post; big?: boolean; showCredit?: boolean; priority?: boolean; sizes?: string }) {
   const url = resolveMediaUrl(post?.coverMedia?.url)
-  return <div className={`article-image ${big ? 'big' : ''}`}>{url ? <img src={url} alt={post?.coverMedia?.altText || post?.title || ''} loading={big ? 'eager' : 'lazy'} /> : <div className="placeholder" aria-label={post ? displayCategory(post) : 'Globaly'}><Sparkles /></div>}</div>
+  const width = post?.coverMedia?.width || (big ? 1280 : 700)
+  const height = post?.coverMedia?.height || (big ? 820 : 460)
+  const displayUrl = url ? imageVariant(url, big ? 1280 : 700) : ''
+  return (
+    <div className={`article-image ${big ? 'big' : ''}`} style={{ '--image-ratio': `${width} / ${height}` } as React.CSSProperties}>
+      {displayUrl ? (
+        <>
+          <img
+            src={displayUrl}
+            srcSet={imageSrcSet(url)}
+            sizes={sizes || (big ? '(max-width: 760px) 100vw, 430px' : '(max-width: 760px) 100vw, 300px')}
+            width={width}
+            height={height}
+            alt={post?.coverMedia?.altText || post?.title || ''}
+            loading={priority ? 'eager' : 'lazy'}
+            fetchPriority={priority ? 'high' : 'auto'}
+            decoding={priority ? 'sync' : 'async'}
+          />
+          {showCredit && <ImageCredit media={post?.coverMedia} linked />}
+        </>
+      ) : <div className="placeholder" aria-label={post ? displayCategory(post) : 'ThePaperLeaf'}><Sparkles /></div>}
+    </div>
+  )
+}
+
+function isUnsplash(url: string) {
+  try {
+    return unsplashHosts.has(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
+function imageVariant(url: string, width: number) {
+  if (!isUnsplash(url)) return url
+  const next = new URL(url)
+  next.searchParams.set('auto', 'format')
+  next.searchParams.set('fit', 'crop')
+  next.searchParams.set('w', String(width))
+  next.searchParams.set('q', width <= 480 ? '72' : '78')
+  return next.toString()
+}
+
+function imageSrcSet(url: string) {
+  if (!isUnsplash(url)) return undefined
+  return [320, 480, 700, 960, 1280].map(width => `${imageVariant(url, width)} ${width}w`).join(', ')
+}
+
+function stockCreditLabel(media?: Post['coverMedia']) {
+  if (!media) return null
+  const provider = media.provider || (media.url.includes('images.unsplash.com') ? 'Unsplash' : null)
+  if (!provider || !['pexels', 'pixabay', 'unsplash'].includes(provider.toLowerCase())) return null
+  return media.attributionName ? `Photo by ${media.attributionName} via ${provider}` : `Photo via ${provider}`
+}
+
+function ImageCredit({ media, linked = false }: { media?: Post['coverMedia']; linked?: boolean }) {
+  const label = stockCreditLabel(media)
+  if (!label) return null
+  return <small className="image-credit">{linked && media?.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{label}</a> : label}</small>
+}
+
+function ImageCredits({ credits }: { credits?: NonNullable<Post['imageCredits']> }) {
+  const stockCredits = credits?.filter(media => stockCreditLabel(media)) ?? []
+  if (!stockCredits.length) return null
+  return <section className="image-credits" aria-label="Image credits"><h2>Image credits</h2><ul>{stockCredits.map(media => <li key={media.id}>{media.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{stockCreditLabel(media)}</a> : stockCreditLabel(media)}{media.license ? ` · ${media.license}` : ''}</li>)}</ul></section>
 }
 
 function HeroImageStack({ posts }: { posts: Post[] }) {
   const key = posts.map(post => post.slug).join('|')
-  return <div className="hero-image-stack" key={key}>{posts.map(post => <ArticleImage key={post.id} post={post} big />)}</div>
+  return <div className="hero-image-stack" key={key}>{posts.map((post, index) => <ArticleImage key={post.id} post={post} big priority={index === 0} sizes="(max-width: 760px) 90vw, 430px" />)}</div>
 }
 
 function ArticleMeta({ post, compact = false }: { post: Post; compact?: boolean }) {
@@ -332,7 +398,7 @@ function ArticleMeta({ post, compact = false }: { post: Post; compact?: boolean 
 
 function AboutHighlights() {
   return (
-    <section className="about-highlights" aria-label="Globaly editorial highlights">
+    <section className="about-highlights" aria-label="ThePaperLeaf editorial highlights">
       {[
         ['Clear context', 'Every story is shaped around what changed, why it matters, and what to watch next.'],
         ['Visual reading', 'Strong imagery, topic sections, and concise summaries make the edition easy to scan.'],
@@ -378,14 +444,14 @@ function EmptyCopy() {
 function NotFound() {
   return (
     <main className="state error">
-      <Seo title="Page not found — Globaly" description="The requested Globaly page could not be found." noIndex />
+      <Seo title="Page not found — ThePaperLeaf" description="The requested ThePaperLeaf page could not be found." noIndex />
       This page is not in the edition.
     </main>
   )
 }
 
 function Footer() {
-  return <footer><b>Globaly<span>.</span></b><p>Independent magazine-style news for curious readers.</p></footer>
+  return <footer><b>ThePaperLeaf<span>.</span></b><p>Independent magazine-style news for curious readers.</p></footer>
 }
 
 function Seo({ title, description, image, canonical, type = 'website', noIndex = false }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean }) {
@@ -426,13 +492,13 @@ function articleJsonLd(article: Post, url: string, image?: string) {
 
 function topicImage(slug: string) {
   return ({
-    business: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=700&q=80',
-    technology: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=700&q=80',
-    culture: 'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=700&q=80',
-    world: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=700&q=80',
-    science: 'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=700&q=80',
-    sport: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=700&q=80'
-  } as Record<string, string>)[slug] ?? 'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=700&q=80'
+    business: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=480&q=74',
+    technology: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=480&q=74',
+    culture: 'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=480&q=74',
+    world: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=480&q=74',
+    science: 'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=480&q=74',
+    sport: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=480&q=74'
+  } as Record<string, string>)[slug] ?? 'https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=480&q=74'
 }
 
 function displayCategory(post: Post) {
@@ -440,7 +506,7 @@ function displayCategory(post: Post) {
 }
 
 function isAboutPage(slug: string) {
-  return slug === 'about-globaly' || slug === 'about-this-cms'
+  return slug === 'about-thepaperleaf' || slug === 'about-this-cms'
 }
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><Layout /></BrowserRouter></React.StrictMode>)
