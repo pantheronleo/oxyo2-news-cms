@@ -7,6 +7,12 @@ import { formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml 
 export const siteName = 'ThePaperLeaf'
 export const siteDescription = 'Independent magazine-style news, analysis, and editorial explainers for curious readers.'
 const unsplashHosts = new Set(['images.unsplash.com', 'plus.unsplash.com'])
+const imageProxyHosts: Record<string, string> = {
+  'images.unsplash.com': 'unsplash',
+  'plus.unsplash.com': 'unsplash',
+  'images.pexels.com': 'pexels',
+  'cdn.pixabay.com': 'pixabay'
+}
 
 export function useAsync<T>(load: () => Promise<T>, deps: React.DependencyList) {
   const [state, setState] = React.useState<{ data?: T; error?: string; loading: boolean }>({ loading: true })
@@ -62,18 +68,33 @@ function isUnsplash(url: string) {
 }
 
 function imageVariant(url: string, width: number) {
-  if (!isUnsplash(url)) return url
+  if (!isUnsplash(url)) return proxyExternalImageUrl(url)
   const next = new URL(url)
   next.searchParams.set('auto', 'format')
   next.searchParams.set('fit', 'crop')
   next.searchParams.set('w', String(width))
   next.searchParams.set('q', width <= 480 ? '72' : '78')
-  return next.toString()
+  return proxyExternalImageUrl(next.toString())
 }
 
 function imageSrcSet(url: string) {
   if (!isUnsplash(url)) return undefined
   return [320, 480, 700, 960, 1280].map(width => `${imageVariant(url, width)} ${width}w`).join(', ')
+}
+
+export function proxyExternalImageUrl(url: string) {
+  try {
+    const source = new URL(url)
+    const provider = imageProxyHosts[source.hostname]
+    if (!provider) return url
+    return `/images/${provider}/${source.pathname.replace(/^\//, '')}${source.search}`
+  } catch {
+    return url
+  }
+}
+
+export function rewriteExternalImageSources(html: string) {
+  return html.replace(/(src\s*=\s*["'])(https?:\/\/(?:images|plus)\.unsplash\.com|https?:\/\/images\.pexels\.com|https?:\/\/cdn\.pixabay\.com)([^"']*)/gi, (_match, prefix, origin, path) => `${prefix}${proxyExternalImageUrl(`${origin}${path}`)}`)
 }
 
 function stockCreditLabel(media?: Post['coverMedia']) {
@@ -132,5 +153,5 @@ export function isAboutPage(slug: string) { return slug === 'about-thepaperleaf'
 
 export function topicImage(slug: string, width = 480) {
   const image = ({ business: 'photo-1507679799987-c73779587ccf', technology: 'photo-1518770660439-4636190af475', culture: 'photo-1495020689067-958852a7765e', world: 'photo-1488646953014-85cb44e25828', science: 'photo-1532187863486-abf9dbad1b69', sport: 'photo-1461896836934-ffe607ba8211' } as Record<string, string>)[slug] ?? 'photo-1495020689067-958852a7765e'
-  return `https://images.unsplash.com/${image}?auto=format&fit=crop&w=${width}&q=${width <= 320 ? 68 : 74}`
+  return `/images/unsplash/${image}?auto=format&fit=crop&w=${width}&q=${width <= 320 ? 68 : 74}`
 }
