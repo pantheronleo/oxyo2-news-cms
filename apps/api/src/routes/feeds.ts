@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Readable } from 'node:stream'
 import { ContentType, prisma } from '@cms/database'
 import { config } from '../config.js'
 
@@ -11,7 +12,7 @@ const categoryUrl = (slug: string) => siteUrl(`/category/${slug}`)
 export async function feedRoutes(app: FastifyInstance) {
   app.get('/robots.txt', async (_req, reply) => {
     reply.type('text/plain; charset=utf-8').header('Cache-Control', 'public, max-age=300')
-    return `User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\n`
+    return reply.send(Readable.from([`User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\n`]))
   })
 
   app.get('/llms.txt', async (_req, reply) => {
