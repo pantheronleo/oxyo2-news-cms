@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom'
 import { CalendarDays, Clock, Send, Sparkles } from 'lucide-react'
 import type { Post } from './newsApi'
 import { formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml } from './utils'
+import { categoryLabel, useLocale } from './locale'
 
 export const siteName = 'ThePaperLeaf'
-export const siteDescription = 'Independent magazine-style news, analysis, and editorial explainers for curious readers.'
 const unsplashHosts = new Set(['images.unsplash.com', 'plus.unsplash.com'])
 const imageProxyHosts: Record<string, string> = {
   'images.unsplash.com': 'unsplash',
@@ -28,13 +28,14 @@ export function useAsync<T>(load: () => Promise<T>, deps: React.DependencyList) 
 }
 
 export function ArticleCard({ post, featured = false }: { post: Post; featured?: boolean }) {
+  const { locale, link, t } = useLocale()
   const sizes = featured
     ? '(max-width: 600px) calc(100vw - 56px), (max-width: 1080px) calc((100vw - 76px) / 2), 380px'
     : '(max-width: 600px) calc(100vw - 42px), (max-width: 1080px) calc((100vw - 76px) / 2), 280px'
   return (
-    <Link className={`card ${featured ? 'featured-card' : ''}`} to={`/article/${post.slug}`} aria-label={`Read ${post.title}`}>
+    <Link className={`card ${featured ? 'featured-card' : ''}`} to={link(`/article/${post.slug}`)} aria-label={`${t('read')} ${post.title}`}>
       <ArticleImage post={post} sizes={sizes} />
-      <span className="kicker">{displayCategory(post)}</span>
+      <span className="kicker">{displayCategory(post, locale)}</span>
       <h3>{post.title}</h3>
       <p>{post.excerpt || stripHtml(post.html).slice(0, 120)}</p>
       <ArticleMeta post={post} compact />
@@ -43,22 +44,24 @@ export function ArticleCard({ post, featured = false }: { post: Post; featured?:
 }
 
 export function MiniCard({ post, active = false, onPreview }: { post: Post; active?: boolean; onPreview?: () => void }) {
+  const { locale, link } = useLocale()
   return (
-    <Link className={`mini-card ${active ? 'active' : ''}`} to={`/article/${post.slug}`} onMouseEnter={onPreview} onFocus={onPreview} aria-current={active ? 'true' : undefined}>
+    <Link className={`mini-card ${active ? 'active' : ''}`} to={link(`/article/${post.slug}`)} onMouseEnter={onPreview} onFocus={onPreview} aria-current={active ? 'true' : undefined}>
       <ArticleImage post={post} sizes="(max-width: 600px) 72px, 92px" />
-      <span><small>{displayCategory(post)}</small><b>{post.title}</b></span>
+      <span><small>{displayCategory(post, locale)}</small><b>{post.title}</b></span>
     </Link>
   )
 }
 
 export function ArticleImage({ post, big = false, showCredit = false, priority = false, sizes }: { post?: Post; big?: boolean; showCredit?: boolean; priority?: boolean; sizes?: string }) {
+  const { locale } = useLocale()
   const url = resolveMediaUrl(post?.coverMedia?.url)
   const width = post?.coverMedia?.width || (big ? 1280 : 700)
   const height = post?.coverMedia?.height || (big ? 820 : 460)
   const displayUrl = url ? imageVariant(url, big ? 1280 : 700) : ''
   return (
     <div className={`article-image ${big ? 'big' : ''}`} style={{ '--image-ratio': `${width} / ${height}` } as React.CSSProperties}>
-      {displayUrl ? <><img src={displayUrl} srcSet={imageSrcSet(url)} sizes={sizes || (big ? '(max-width: 760px) calc(100vw - 24px), 820px' : '(max-width: 600px) calc(100vw - 42px), 300px')} width={width} height={height} alt={post?.coverMedia?.altText || post?.title || ''} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding={priority ? 'sync' : 'async'} />{showCredit && <ImageCredit media={post?.coverMedia} linked />}</> : <div className="placeholder" aria-label={post ? displayCategory(post) : 'ThePaperLeaf'}><Sparkles /></div>}
+      {displayUrl ? <><img src={displayUrl} srcSet={imageSrcSet(url)} sizes={sizes || (big ? '(max-width: 760px) calc(100vw - 24px), 820px' : '(max-width: 600px) calc(100vw - 42px), 300px')} width={width} height={height} alt={post?.coverMedia?.altText || post?.title || ''} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} decoding={priority ? 'sync' : 'async'} />{showCredit && <ImageCredit media={post?.coverMedia} linked />}</> : <div className="placeholder" aria-label={post ? displayCategory(post, locale) : 'ThePaperLeaf'}><Sparkles /></div>}
     </div>
   )
 }
@@ -105,15 +108,18 @@ function stockCreditLabel(media?: Post['coverMedia']) {
 }
 
 function ImageCredit({ media, linked = false }: { media?: Post['coverMedia']; linked?: boolean }) {
+  const { t } = useLocale()
   const label = stockCreditLabel(media)
   if (!label) return null
-  return <small className="image-credit">{linked && media?.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{label}</a> : label}</small>
+  const localized = media?.attributionName ? t('photoBy', { name: media.attributionName, provider: media.provider || 'Unsplash' }) : t('photoVia', { provider: media?.provider || 'Unsplash' })
+  return <small className="image-credit">{linked && media?.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{localized}</a> : localized}</small>
 }
 
 export function ImageCredits({ credits }: { credits?: NonNullable<Post['imageCredits']> }) {
+  const { t } = useLocale()
   const stockCredits = credits?.filter(media => stockCreditLabel(media)) ?? []
   if (!stockCredits.length) return null
-  return <section className="image-credits" aria-label="Image credits"><h2>Image credits</h2><ul>{stockCredits.map(media => <li key={media.id}>{media.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{stockCreditLabel(media)}</a> : stockCreditLabel(media)}{media.license ? ` · ${media.license}` : ''}</li>)}</ul></section>
+  return <section className="image-credits" aria-label={t('imageCreditAria')}><h2>{t('imageCredits')}</h2><ul>{stockCredits.map(media => { const label = media.attributionName ? t('photoBy', { name: media.attributionName, provider: media.provider || 'Unsplash' }) : t('photoVia', { provider: media.provider || 'Unsplash' }); return <li key={media.id}>{media.attributionUrl ? <a href={media.attributionUrl} target="_blank" rel="noreferrer noopener">{label}</a> : label}{media.license ? ` · ${media.license}` : ''}</li> })}</ul></section>
 }
 
 export function HeroImageStack({ posts }: { posts: Post[] }) {
@@ -122,24 +128,27 @@ export function HeroImageStack({ posts }: { posts: Post[] }) {
 }
 
 export function ArticleMeta({ post, compact = false }: { post: Post; compact?: boolean }) {
-  if (compact) return <div className="card-footer"><span className="footer-author">{post.authorName || 'Editorial Desk'}</span><span className="footer-date"><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt)}</span><span className="footer-read"><Clock />{readingTime(post.wordCount)}</span>{post.sourceLabel && (post.sourceUrl ? <a className="footer-source" href={post.sourceUrl} target="_blank" rel="noreferrer noopener">Source: {post.sourceLabel}</a> : <span className="footer-source">{post.sourceLabel}</span>)}</div>
-  return <p className="meta"><span>{post.authorName || 'Editorial Desk'}</span><span><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt)}</span><span><Clock />{readingTime(post.wordCount)}</span>{post.sourceLabel && (post.sourceUrl ? <a href={post.sourceUrl} target="_blank" rel="noreferrer noopener">Source: {post.sourceLabel}</a> : <span>{post.sourceLabel}</span>)}</p>
+  const { locale, t } = useLocale()
+  if (compact) return <div className="card-footer"><span className="footer-author">{post.authorName || t('editorialDesk')}</span><span className="footer-date"><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt, locale)}</span><span className="footer-read"><Clock />{readingTime(post.wordCount, locale)}</span>{post.sourceLabel && (post.sourceUrl ? <a className="footer-source" href={post.sourceUrl} target="_blank" rel="noreferrer noopener">{t('source')} {post.sourceLabel}</a> : <span className="footer-source">{post.sourceLabel}</span>)}</div>
+  return <p className="meta"><span>{post.authorName || t('editorialDesk')}</span><span><CalendarDays />{formatDate(post.publishedAt ?? post.createdAt, locale)}</span><span><Clock />{readingTime(post.wordCount, locale)}</span>{post.sourceLabel && (post.sourceUrl ? <a href={post.sourceUrl} target="_blank" rel="noreferrer noopener">{t('source')} {post.sourceLabel}</a> : <span>{post.sourceLabel}</span>)}</p>
 }
 
 export function AboutHighlights() {
-  return <section className="about-highlights" aria-label="ThePaperLeaf editorial highlights">{[['Clear context', 'Every story is shaped around what changed, why it matters, and what to watch next.'], ['Visual reading', 'Strong imagery, topic sections, and concise summaries make the edition easy to scan.'], ['Editorial range', 'Coverage spans business, technology, culture, world affairs, science, and sport.'], ['Reader first', 'The experience is designed to stay fast, accessible, and calm across desktop and mobile.']].map(([title, copy]) => <article key={title}><h2>{title}</h2><p>{copy}</p></article>)}</section>
+  const { t } = useLocale()
+  return <section className="about-highlights" aria-label={t('highlightsAria')}>{[['clearContext', 'clearContextCopy'], ['visualReading', 'visualReadingCopy'], ['editorialRange', 'editorialRangeCopy'], ['readerFirst', 'readerFirstCopy']].map(([title, body]) => <article key={title}><h2>{t(title as 'clearContext' | 'visualReading' | 'editorialRange' | 'readerFirst')}</h2><p>{t(body as 'clearContextCopy' | 'visualReadingCopy' | 'editorialRangeCopy' | 'readerFirstCopy')}</p></article>)}</section>
 }
 
 export function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) { return <div className="section-title"><span className="kicker">{eyebrow}</span><h2>{title}</h2></div> }
 
-export function Newsletter() { return <section className="newsletter"><div><span className="kicker">Subscribe</span><h2>Insight Digest for the curious reader</h2><p>Get weekly analysis, media picks, and editorial highlights. This v1 form is visual only.</p></div><form onSubmit={event => event.preventDefault()}><input aria-label="Email address" placeholder="you@example.com" /><button><Send />Subscribe</button></form></section> }
+export function Newsletter() { const { t } = useLocale(); return <section className="newsletter"><div><span className="kicker">{t('subscribe')}</span><h2>{t('newsletterTitle')}</h2><p>{t('newsletterCopy')}</p></div><form onSubmit={event => event.preventDefault()}><input aria-label={t('email')} placeholder="you@example.com" /><button><Send />{t('subscribe')}</button></form></section> }
 
-export function Loading() { return <main className="state">Loading the newsroom…</main> }
+export function Loading() { const { t } = useLocale(); return <main className="state">{t('loading')}</main> }
 export function ErrorView({ message }: { message: string }) { return <main className="state error">{message}</main> }
-export function EmptyCopy() { return <div className="empty-copy">No published stories yet. The next edition is being prepared.</div> }
+export function EmptyCopy() { const { t } = useLocale(); return <div className="empty-copy">{t('noStories')}</div> }
 
 export function Seo({ title, description, image, canonical, type = 'website', noIndex = false }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean }) {
-  React.useEffect(() => setSeo({ title, description, image, canonical, type, noIndex, siteName }), [title, description, image, canonical, type, noIndex])
+  const { locale } = useLocale()
+  React.useEffect(() => setSeo({ title, description, image, canonical, type, noIndex, siteName, locale }), [title, description, image, canonical, type, noIndex, locale])
   return null
 }
 
@@ -147,8 +156,8 @@ export function JsonLd({ id, data }: { id: string; data: unknown }) { React.useE
 
 export function absoluteUrl(path: string) { return typeof window === 'undefined' ? path : new URL(path, window.location.origin).toString() }
 export function publisherJsonLd() { return { '@type': 'Organization', name: siteName, url: absoluteUrl('/'), logo: { '@type': 'ImageObject', url: absoluteUrl('/favicon.svg') } } }
-export function articleJsonLd(article: Post, url: string, image?: string) { return { '@context': 'https://schema.org', '@type': 'NewsArticle', headline: article.title, description: article.seoDescription || article.excerpt, image: image ? [image] : undefined, datePublished: article.publishedAt || article.createdAt, dateModified: article.updatedAt, author: { '@type': 'Person', name: article.authorName || 'Editorial Desk' }, publisher: publisherJsonLd(), mainEntityOfPage: { '@type': 'WebPage', '@id': url }, articleSection: displayCategory(article), keywords: article.tags?.join(', ') } }
-export function displayCategory(post: Post) { return post.categoryRef?.name || post.category || 'General' }
+export function articleJsonLd(article: Post, url: string, image?: string, locale: 'zh-CN' | 'en' = 'zh-CN') { return { '@context': 'https://schema.org', '@type': 'NewsArticle', headline: article.title, description: article.seoDescription || article.excerpt, image: image ? [image] : undefined, datePublished: article.publishedAt || article.createdAt, dateModified: article.updatedAt, inLanguage: locale, author: { '@type': 'Person', name: article.authorName || (locale === 'zh-CN' ? '编辑部' : 'Editorial Desk') }, publisher: publisherJsonLd(), mainEntityOfPage: { '@type': 'WebPage', '@id': url }, articleSection: displayCategory(article, locale), keywords: article.tags?.join(', ') } }
+export function displayCategory(post: Post, locale: 'zh-CN' | 'en' = 'zh-CN') { return post.categoryRef ? categoryLabel(post.categoryRef, locale) : post.category || (locale === 'zh-CN' ? '综合' : 'General') }
 export function isAboutPage(slug: string) { return slug === 'about-thepaperleaf' || slug === 'about-this-cms' }
 
 export function topicImage(slug: string, width = 480) {

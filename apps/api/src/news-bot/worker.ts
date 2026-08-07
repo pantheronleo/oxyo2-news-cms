@@ -9,16 +9,26 @@ import { uploadRoot } from '../lib/uploads.js'
 import { classifyArticleCategory, findSemanticDuplicate, rewriteArticle, usesLocalAi } from './openai.js'
 import { canonicalUrl } from './verification.js'
 import { enhanceArticleBody, rssAtomAdapter } from './adapters.js'
-import { resolveVisual, type VisualAsset } from './visuals.js'
+import { fallbackCoverVisual, resolveVisual, type VisualAsset } from './visuals.js'
 
-type Source = { id: string; name: string; feedUrl: string; sourceLabel: string; category: string; categoryId: string | null; allowsSourceImageReference: boolean; sourceImagePermissionUrl: string | null }
+type Source = { id: string; name: string; feedUrl: string; sourceLabel: string; category: string; categoryId: string | null }
 type CmsCategory = { id: string; name: string }
 type Article = { title: string; url: string; body: string; publishedAt?: string }
 type Counts = { processed: number; created: number; skipped: number; failed: number }
 let scheduler: NodeJS.Timeout | undefined
 let workerPoller: NodeJS.Timeout | undefined
 
-export function shouldStartRun(settings: { enabled: boolean; lastScheduledAt: Date | null; intervalMinutes: number }, now = Date.now()) { return settings.enabled && (!settings.lastScheduledAt || now - settings.lastScheduledAt.getTime() >= settings.intervalMinutes * 60_000) }
+type ScheduleSettings = { enabled: boolean; lastScheduledAt: Date | null; intervalMinutes: number; workingStartHour?: number; workingEndHour?: number }
+
+export function isWithinWorkingHours(settings: Pick<ScheduleSettings, 'workingStartHour' | 'workingEndHour'>, now = Date.now(), timeZone = config.NEWS_BOT_TIMEZONE) {
+  const start = settings.workingStartHour ?? 0
+  const end = settings.workingEndHour ?? 0
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(new Date(now)))
+  if (start === end) return true
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end
+}
+
+export function shouldStartRun(settings: ScheduleSettings, now = Date.now()) { return settings.enabled && isWithinWorkingHours(settings, now) && (!settings.lastScheduledAt || now - settings.lastScheduledAt.getTime() >= settings.intervalMinutes * 60_000) }
 export function isTerminalNewsBotItem(status: NewsBotItemStatus) { return status === NewsBotItemStatus.CREATED || status === NewsBotItemStatus.SKIPPED }
 
 async function log(runId: string, level: NewsBotLogLevel, stage: string, message: string, context?: Record<string, unknown>, sourceId?: string, itemId?: string) {
@@ -139,26 +149,26 @@ async function processArticle(source: Source, runId: string, article: Article, c
       await log(runId, NewsBotLogLevel.INFO, 'translation-complete', 'English translation completed successfully.', { language: 'en', title: english.title, wordCount: wordCount(english.markdown) }, source.id, item.id)
     } catch (error) { await log(runId, NewsBotLogLevel.WARN, 'translation-failed', error instanceof Error ? error.message : 'English translation failed; Chinese draft will remain available for review.', { language: 'en' }, source.id, item.id) }
 
-    const coverResult = await resolveVisual({ query: chinese.imageSearchQuery, fallbackQueries: [english?.imageSearchQuery || '', english?.title || '', `${category.name} news`], prompt: chinese.imagePrompt, purpose: 'cover', allowSourceReference: source.allowsSourceImageReference, articleUrl: sourceUrl })
+    const coverResult = await resolveVisual({ query: chinese.imageSearchQuery, fallbackQueries: [english?.imageSearchQuery || '', article.title, english?.title || '', `${category.name} editorial photo`], purpose: 'cover' })
     await logVisualAttempts(runId, source, item.id, coverResult.attempts, 'cover')
-    const cover = coverResult.asset ? await saveVisualAsset(coverResult.asset, chinese.title, 'cover') : null
-    if (coverResult.asset?.visualOrigin === 'SOURCE_REFERENCE_AI' && coverResult.asset.attributionUrl) await prisma.newsBotItem.update({ where: { id: item.id }, data: { sourceImageUrl: coverResult.asset.attributionUrl } })
-    await log(runId, cover ? NewsBotLogLevel.INFO : NewsBotLogLevel.WARN, cover ? 'cover-image-created' : 'cover-image-unavailable', cover ? 'Stored the selected cover image.' : 'No cover image could be resolved; the draft will be marked for visual review.', cover ? { mediaId: cover.id, provider: coverResult.asset?.provider, origin: coverResult.asset?.visualOrigin } : undefined, source.id, item.id)
+    const usedFallbackCover = !coverResult.asset
+    const cover = await saveVisualAsset(coverResult.asset || fallbackCoverVisual({ title: chinese.title, category: category.name }), chinese.title, 'cover')
+    await log(runId, usedFallbackCover ? NewsBotLogLevel.WARN : NewsBotLogLevel.INFO, usedFallbackCover ? 'cover-image-fallback' : 'cover-image-created', usedFallbackCover ? 'No suitable stock cover image was found; stored a local fallback thumbnail and marked the draft for visual review.' : 'Stored the selected cover image.', usedFallbackCover ? { mediaId: cover.id, provider: 'ThePaperLeaf', origin: 'SYSTEM_FALLBACK', queriesTried: [chinese.imageSearchQuery, english?.imageSearchQuery || '', article.title, english?.title || '', `${category.name} editorial photo`].filter(Boolean) } : { mediaId: cover.id, provider: coverResult.asset?.provider, origin: coverResult.asset?.visualOrigin }, source.id, item.id)
     const inlineImages: InlineImage[] = []
     for (const [index, plan] of chinese.inlineImages.entries()) {
-      const resolution = await resolveVisual({ query: plan.prompt, fallbackQueries: [chinese.imageSearchQuery, `${category.name} news`], prompt: plan.prompt, purpose: 'inline', allowSourceReference: source.allowsSourceImageReference, articleUrl: sourceUrl })
+      const resolution = await resolveVisual({ query: plan.prompt, fallbackQueries: [chinese.imageSearchQuery, `${category.name} news`], purpose: 'inline' })
       await logVisualAttempts(runId, source, item.id, resolution.attempts, 'inline')
       if (!resolution.asset) continue
       try {
         const media = await saveVisualAsset(resolution.asset, chinese.title, 'inline', index + 1)
         inlineImages.push({ url: media.url, altText: plan.altText, afterParagraph: plan.afterParagraph })
-        await log(runId, NewsBotLogLevel.INFO, 'inline-image-created', 'Generated and placed a supporting article illustration.', { mediaId: media.id, position: plan.afterParagraph, index: index + 1, provider: resolution.asset.provider, origin: resolution.asset.visualOrigin }, source.id, item.id)
+        await log(runId, NewsBotLogLevel.INFO, 'inline-image-created', 'Stored and placed a supporting stock image.', { mediaId: media.id, position: plan.afterParagraph, index: index + 1, provider: resolution.asset.provider, origin: resolution.asset.visualOrigin }, source.id, item.id)
       } catch (error) { await log(runId, NewsBotLogLevel.WARN, 'inline-image-failed', error instanceof Error ? error.message : 'Supporting image storage failed.', { position: plan.afterParagraph, index: index + 1 }, source.id, item.id) }
     }
     const chineseMarkdown = withCredit(insertInlineImages(chinese.markdown, inlineImages), source, sourceUrl, true)
     const englishMarkdown = english ? withCredit(english.markdown, source, sourceUrl, false) : null
-    const visualNeedsReview = !cover || !inlineImages.length
-    const content = await prisma.content.create({ data: { type: ContentType.POST, status: 'DRAFT', title: chinese.title, slug: await uniqueSlug(chinese.title, randomUUID().slice(0, 6)), excerpt: chinese.excerpt, category: category.name, categoryId: category.id || null, authorName: 'Editorial Desk', sourceLabel: source.sourceLabel, sourceUrl, markdown: chineseMarkdown, html: renderMarkdown(chineseMarkdown), wordCount: wordCount(chineseMarkdown), tags: chinese.tags, seoTitle: chinese.seoTitle, seoDescription: chinese.seoDescription, coverMediaId: cover?.id ?? null, visualNeedsReview, translations: english && englishMarkdown ? { create: { language: ContentLanguage.EN, title: english.title, excerpt: english.excerpt, markdown: englishMarkdown, html: renderMarkdown(englishMarkdown), wordCount: wordCount(englishMarkdown), seoTitle: english.seoTitle, seoDescription: english.seoDescription } } : undefined } })
+    const visualNeedsReview = usedFallbackCover || !inlineImages.length
+    const content = await prisma.content.create({ data: { type: ContentType.POST, status: 'DRAFT', title: chinese.title, slug: await uniqueSlug(chinese.title, randomUUID().slice(0, 6)), excerpt: chinese.excerpt, category: category.name, categoryId: category.id || null, authorName: 'Editorial Desk', sourceLabel: source.sourceLabel, sourceUrl, markdown: chineseMarkdown, html: renderMarkdown(chineseMarkdown), wordCount: wordCount(chineseMarkdown), tags: chinese.tags, seoTitle: chinese.seoTitle, seoDescription: chinese.seoDescription, coverMediaId: cover.id, visualNeedsReview, translations: english && englishMarkdown ? { create: { language: ContentLanguage.EN, title: english.title, excerpt: english.excerpt, markdown: englishMarkdown, html: renderMarkdown(englishMarkdown), wordCount: wordCount(englishMarkdown), seoTitle: english.seoTitle, seoDescription: english.seoDescription } } : undefined } })
     await prisma.newsBotItem.update({ where: { id: item.id }, data: { status: NewsBotItemStatus.CREATED, contentId: content.id, error: null } })
     await log(runId, visualNeedsReview ? NewsBotLogLevel.WARN : NewsBotLogLevel.INFO, 'draft-created', 'Created a Chinese-primary CMS draft for editorial review.', { contentId: content.id, slug: content.slug, hasCover: Boolean(cover), inlineImageCount: inlineImages.length, englishTranslation: Boolean(english), visualNeedsReview }, source.id, item.id)
     return 'created'
@@ -199,6 +209,7 @@ async function processSource(source: Source, runId: string, articleLimit: number
 export async function queueScheduledNewsBotRun(options: { force?: boolean } = {}) {
   const settings = await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' } })
   if (!settings.enabled) return null
+  if (!isWithinWorkingHours(settings)) return null
   const active = await prisma.newsBotRun.findFirst({ where: { status: { in: [NewsBotRunStatus.QUEUED, NewsBotRunStatus.RUNNING] } }, select: { id: true } })
   if (active) return null
   if (!options.force && !shouldStartRun(settings)) return null
@@ -208,28 +219,29 @@ export async function queueScheduledNewsBotRun(options: { force?: boolean } = {}
     if (stillActive) return null
     if (!options.force) {
       const current = await tx.newsBotSettings.findUnique({ where: { id: 'default' } })
-      if (!current?.enabled || !shouldStartRun(current, now.getTime())) return null
+      if (!current?.enabled || !isWithinWorkingHours(current, now.getTime()) || (!options.force && !shouldStartRun(current, now.getTime()))) return null
     }
     await tx.newsBotSettings.update({ where: { id: 'default' }, data: { lastScheduledAt: now } })
     return tx.newsBotRun.create({ data: { trigger: NewsBotTrigger.SCHEDULED, sourceCount } })
   })
   if (!run) return null
-  await log(run.id, NewsBotLogLevel.INFO, 'schedule-queued', options.force ? 'Scheduled automation was started and its first run was queued.' : 'The next scheduled automation run was queued.', { sourceCount, intervalMinutes: settings.intervalMinutes })
+  await log(run.id, NewsBotLogLevel.INFO, 'schedule-queued', options.force ? 'Scheduled automation was started and its first run was queued.' : 'The next scheduled automation run was queued.', { sourceCount, intervalMinutes: settings.intervalMinutes, workingStartHour: settings.workingStartHour, workingEndHour: settings.workingEndHour, timeZone: config.NEWS_BOT_TIMEZONE })
   return run
 }
 
 async function claimQueuedRun() {
+  const settings = await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' } })
+  if (!isWithinWorkingHours(settings)) return null
   const run = await prisma.newsBotRun.findFirst({ where: { status: NewsBotRunStatus.QUEUED }, orderBy: { createdAt: 'asc' } })
   if (!run) return null
   const claimed = await prisma.newsBotRun.updateMany({ where: { id: run.id, status: NewsBotRunStatus.QUEUED }, data: { status: NewsBotRunStatus.RUNNING, startedAt: new Date() } })
   if (!claimed.count) return null
-  const settings = await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' } })
   return { settings, run }
 }
 
 export async function runNewsBotOnce() {
   const candidate = await claimQueuedRun(); if (!candidate) return false
-  const sources = await prisma.newsBotSource.findMany({ where: { isEnabled: true }, select: { id: true, name: true, feedUrl: true, sourceLabel: true, category: true, categoryId: true, allowsSourceImageReference: true, sourceImagePermissionUrl: true } })
+  const sources = await prisma.newsBotSource.findMany({ where: { isEnabled: true }, select: { id: true, name: true, feedUrl: true, sourceLabel: true, category: true, categoryId: true } })
   const categories = await prisma.category.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
   const counts: Counts = { processed: 0, created: 0, skipped: 0, failed: 0 }
   await log(candidate.run.id, NewsBotLogLevel.INFO, 'run-started', 'News bot run started.', { trigger: candidate.run.trigger, enabledSources: sources.length, aiProvider: usesLocalAi() ? 'ollama' : 'openai' })

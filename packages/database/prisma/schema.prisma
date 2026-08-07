@@ -118,6 +118,8 @@ model NewsBotSettings {
   enabled Boolean @default(false)
   intervalMinutes Int @default(120)
   articleLimit Int?
+  workingStartHour Int @default(8)
+  workingEndHour Int @default(0)
   lastRunAt DateTime?
   lastScheduledAt DateTime?
   createdAt DateTime @default(now())
@@ -204,8 +206,10 @@ model NewsBotLog {
 model Category {
   id String @id @default(cuid())
   name String @unique
+  nameZh String @default("")
   slug String @unique
   description String @default("")
+  descriptionZh String @default("")
   color String @default("#2521E1")
   sortOrder Int @default(0)
   isActive Boolean @default(true)

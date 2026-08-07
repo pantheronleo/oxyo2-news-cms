@@ -1,28 +1,28 @@
 import type { FastifyInstance } from 'fastify'
 import { NewsBotRunStatus, prisma } from '@cms/database'
 import { requireAdmin } from '../auth.js'
-import { queueScheduledNewsBotRun } from '../news-bot/worker.js'
+import { config } from '../config.js'
+import { isWithinWorkingHours, queueScheduledNewsBotRun } from '../news-bot/worker.js'
 
-const sourceSelect = { id: true, name: true, feedUrl: true, sourceLabel: true, category: true, categoryId: true, credentialEnvKey: true, allowsSourceImageReference: true, sourceImagePermissionUrl: true, isEnabled: true, createdAt: true, updatedAt: true }
-const settingSelect = { id: true, enabled: true, intervalMinutes: true, articleLimit: true, lastRunAt: true, lastScheduledAt: true, createdAt: true, updatedAt: true }
+const sourceSelect = { id: true, name: true, feedUrl: true, sourceLabel: true, category: true, categoryId: true, credentialEnvKey: true, isEnabled: true, createdAt: true, updatedAt: true }
+const settingSelect = { id: true, enabled: true, intervalMinutes: true, articleLimit: true, workingStartHour: true, workingEndHour: true, lastRunAt: true, lastScheduledAt: true, createdAt: true, updatedAt: true }
+const presentSettings = (settings: { id: string; enabled: boolean; intervalMinutes: number; articleLimit: number | null; workingStartHour: number; workingEndHour: number; lastRunAt: Date | null; lastScheduledAt: Date | null; createdAt: Date; updatedAt: Date }) => ({ ...settings, timeZone: config.NEWS_BOT_TIMEZONE, withinWorkingHours: isWithinWorkingHours(settings) })
 const sourceData = (body: any) => {
   const feedUrl = String(body.feedUrl ?? '').trim(); const parsed = new URL(feedUrl)
   if (parsed.protocol !== 'https:') throw new Error('Feed URL must use HTTPS')
   const name = String(body.name ?? '').trim(); if (!name) throw new Error('Source name is required')
-  const allowsSourceImageReference = Boolean(body.allowsSourceImageReference); const sourceImagePermissionUrl = body.sourceImagePermissionUrl ? String(body.sourceImagePermissionUrl).trim() : null
-  if (sourceImagePermissionUrl) new URL(sourceImagePermissionUrl)
-  if (allowsSourceImageReference && !sourceImagePermissionUrl) throw new Error('Add an evidence URL before enabling publisher image references')
-  return { name, feedUrl: parsed.toString(), sourceLabel: String(body.sourceLabel ?? name).trim() || name, category: String(body.category ?? 'General').trim() || 'General', categoryId: body.categoryId ? String(body.categoryId) : null, credentialEnvKey: body.credentialEnvKey ? String(body.credentialEnvKey).trim() : null, allowsSourceImageReference, sourceImagePermissionUrl, isEnabled: Boolean(body.isEnabled) }
+  return { name, feedUrl: parsed.toString(), sourceLabel: String(body.sourceLabel ?? name).trim() || name, category: String(body.category ?? 'General').trim() || 'General', categoryId: body.categoryId ? String(body.categoryId) : null, credentialEnvKey: body.credentialEnvKey ? String(body.credentialEnvKey).trim() : null, isEnabled: Boolean(body.isEnabled) }
 }
 
 export async function newsBotRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
-  app.get('/settings', async () => ({ data: await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' }, select: settingSelect }) }))
+  app.get('/settings', async () => ({ data: presentSettings(await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' }, select: settingSelect })) }))
   app.patch('/settings', async (req, reply) => { try {
-    const body = req.body as any; const intervalMinutes = Number(body.intervalMinutes); const articleLimit = body.articleLimit === null || body.articleLimit === '' || body.articleLimit === undefined ? null : Number(body.articleLimit)
+    const body = req.body as any; const intervalMinutes = Number(body.intervalMinutes); const articleLimit = body.articleLimit === null || body.articleLimit === '' || body.articleLimit === undefined ? null : Number(body.articleLimit); const workingStartHour = Number(body.workingStartHour); const workingEndHour = Number(body.workingEndHour)
     if (!Number.isInteger(intervalMinutes) || intervalMinutes < 5 || intervalMinutes > 10080) throw new Error('Interval must be between 5 and 10,080 minutes')
     if (articleLimit !== null && (!Number.isInteger(articleLimit) || articleLimit < 1 || articleLimit > 1000)) throw new Error('Article limit must be blank (all unseen) or between 1 and 1,000')
-    return { data: await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: { enabled: Boolean(body.enabled), intervalMinutes, articleLimit }, create: { id: 'default', enabled: Boolean(body.enabled), intervalMinutes, articleLimit }, select: settingSelect }) }
+    if (!Number.isInteger(workingStartHour) || workingStartHour < 0 || workingStartHour > 23 || !Number.isInteger(workingEndHour) || workingEndHour < 0 || workingEndHour > 23) throw new Error('Working hours must use whole hours from 00:00 through 23:00')
+    return { data: presentSettings(await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: { enabled: Boolean(body.enabled), intervalMinutes, articleLimit, workingStartHour, workingEndHour }, create: { id: 'default', enabled: Boolean(body.enabled), intervalMinutes, articleLimit, workingStartHour, workingEndHour }, select: settingSelect })) }
   } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_BOT_SETTINGS', message: error instanceof Error ? error.message : 'Invalid settings' } }) } })
   app.get('/sources', async () => ({ data: await prisma.newsBotSource.findMany({ select: sourceSelect, orderBy: { name: 'asc' } }) }))
   app.post('/sources', async (req, reply) => { try { return reply.code(201).send({ data: await prisma.newsBotSource.create({ data: sourceData(req.body), select: sourceSelect }) }) } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_BOT_SOURCE', message: error instanceof Error ? error.message : 'Invalid source' } }) } })
@@ -58,7 +58,8 @@ export async function newsBotRoutes(app: FastifyInstance) {
   app.post('/runs', async (_req, reply) => {
     const existing = await prisma.newsBotRun.findFirst({ where: { status: { in: [NewsBotRunStatus.QUEUED, NewsBotRunStatus.RUNNING] } } })
     if (existing) return reply.code(409).send({ error: { code: 'SCHEDULE_ACTIVE', message: 'Scheduled automation is already active. Pause scheduling before starting it again.' } })
-    await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: { enabled: true }, create: { id: 'default', enabled: true } })
+    const settings = await prisma.newsBotSettings.upsert({ where: { id: 'default' }, update: { enabled: true }, create: { id: 'default', enabled: true } })
+    if (!isWithinWorkingHours(settings)) return reply.code(409).send({ error: { code: 'OUTSIDE_WORKING_HOURS', message: `Scheduled runs are limited to ${String(settings.workingStartHour).padStart(2, '0')}:00–${String(settings.workingEndHour).padStart(2, '0')}:00 (${config.NEWS_BOT_TIMEZONE}).` } })
     const run = await queueScheduledNewsBotRun({ force: true })
     if (!run) return reply.code(409).send({ error: { code: 'SCHEDULE_NOT_QUEUED', message: 'The scheduled automation could not be queued. Refresh and try again.' } })
     return reply.code(202).send({ data: run })

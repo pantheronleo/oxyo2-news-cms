@@ -97,6 +97,37 @@ export function fallbackMetadataFromMarkdown(markdown: string, sourceTitle: stri
   return { title, excerpt, seoTitle: title, seoDescription: excerpt.slice(0, 160) }
 }
 
+const hanCharacters = (value: string) => (value.match(/[\u3400-\u9fff]/g) ?? []).length
+const latinCharacters = (value: string) => (value.match(/[A-Za-z]/g) ?? []).length
+
+/** Chinese-primary drafts must contain real Chinese copy, not English content with a Chinese credit line. */
+export function chinesePrimaryMissing(post: Pick<RewrittenPost, 'title' | 'excerpt' | 'markdown'>) {
+  const body = markdownText(post.markdown)
+  const bodyHan = hanCharacters(body); const bodyLatin = latinCharacters(body)
+  const missing: string[] = []
+  if (hanCharacters(post.title) < 2) missing.push('Chinese title')
+  if (hanCharacters(post.excerpt) < 8) missing.push('Chinese excerpt')
+  if (bodyHan < 80 || (bodyHan / Math.max(1, bodyHan + bodyLatin)) < 0.15) missing.push('Chinese article body')
+  return missing
+}
+
+export function normalizeEditorialTitle(title: string, sourceName: string) {
+  let normalized = title.replace(/\s+/g, ' ').trim()
+  const publisher = sourceName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (publisher) {
+    const leading = new RegExp(`^\\s*(?:\\[|【|\\()\\s*${publisher}\\s*(?:\\]|】|\\))\\s*(?:[-–—|｜:：]+\\s*)?`, 'i')
+    const trailing = new RegExp(`\\s*(?:[-–—|｜:：]+\\s*)?(?:\\[|【|\\()\\s*${publisher}\\s*(?:\\]|】|\\))\\s*$`, 'i')
+    normalized = normalized.replace(leading, '').replace(trailing, '')
+  }
+  return normalized.replace(/^\s*(?:\[[^\]]{2,70}\]|【[^】]{2,70}】)\s*(?:[-–—|｜:：]+\s*)?/, '').replace(/^[-–—|｜:：\s]+|[-–—|｜:：\s]+$/g, '').trim()
+}
+
+function normalizeEditorialPost(post: RewrittenPost, sourceName: string) {
+  const title = normalizeEditorialTitle(post.title, sourceName) || post.title.trim()
+  const seoTitle = normalizeEditorialTitle(post.seoTitle, sourceName) || title
+  return { ...post, title, seoTitle }
+}
+
 export function validateRewrittenPost(value: any): { post?: RewrittenPost; missing: string[] } {
   const requiredStrings = ['title', 'excerpt', 'markdown', 'seoTitle', 'seoDescription', 'imagePrompt', 'imageSearchQuery'] as const
   const missing: string[] = requiredStrings.filter(field => typeof value?.[field] !== 'string' || !value[field].trim())
@@ -151,10 +182,21 @@ async function repairMetadata(input: { title: string; language: ArticleLanguage 
   return Object.fromEntries(fields.map(field => [field, value[field].trim()])) as RepairedMetadata
 }
 
+async function repairChinesePrimary(input: { sourceName: string; sourceUrl: string; title: string; body: string }, credit: string) {
+  const prompt = `请把以下新闻素材改写成完整、自然的简体中文新闻稿。标题、摘要、SEO 标题、SEO 描述和正文必须以简体中文为主；不得保留英文标题作为中文标题，也不得在标题前后加上来源名称、[来源]、【来源】或网站品牌。标题必须准确概括新闻事件，而不是复制来源标题。只能依据素材，不得添加事实。正文至少五段，并以这句作为最后一行来源标注：${credit}。imageSearchQuery 必须保留简短英文，供图库检索。仅返回符合 JSON schema 的完整对象，不要解释。\n\n来源标题：${input.title}\n来源正文：\n${input.body.slice(0, 16_000)}`
+  const value = parseAiJson(await requestJson(prompt, rewriteJsonSchema, 'rewrite-chinese-language-repair'))
+  const validation = validateRewrittenPost(value)
+  if (!validation.post) throw new Error(`Chinese language repair was incomplete: ${validation.missing.join(', ')}`)
+  const post = normalizeEditorialPost(validation.post, input.sourceName)
+  const missing = chinesePrimaryMissing(post)
+  if (missing.length) throw new Error(`Chinese language repair still returned ${missing.join(', ')}`)
+  return post
+}
+
 export async function rewriteArticle(input: { sourceName: string; sourceUrl: string; title: string; body: string; language: ArticleLanguage }): Promise<RewrittenPost> {
   const languageInstruction = input.language === 'zh-CN' ? 'Write in Simplified Chinese (简体中文). Chinese is the primary publication language.' : 'Write in natural English.'
   const credit = input.language === 'zh-CN' ? `原文来源：[${input.sourceName}](${input.sourceUrl})。` : `Originally reported by [${input.sourceName}](${input.sourceUrl}).`
-  const prompt = `Create a 600-900 word original news rewrite based only on the supplied source material. Do not copy its wording or structure, do not add facts, and use a factual, neutral style. ${languageInstruction} Markdown must contain at least five substantive paragraphs before the credit line; never return only a summary, image captions, or the credit line. Include this exact final Markdown credit line in markdown: ${credit} Return a short English imageSearchQuery suitable for stock-photo search. Plan one or two optional supporting editorial illustrations in inlineImages. Each image must be contextual, contain no text/logo/chart, and use 1-based afterParagraph placement. Return exactly one valid JSON object matching the schema; no reasoning, preamble, or Markdown fences.\n\nSource title: ${input.title}\nSource text:\n${input.body.slice(0, 16_000)}`
+  const prompt = `Create a 600-900 word original news rewrite based only on the supplied source material. Do not copy its wording or structure, do not add facts, and use a factual, neutral style. ${languageInstruction} The title must be a standalone editorial headline that accurately reflects the news context. Never copy the source title mechanically. Never include a publisher, website name, source label, or bracketed placeholder such as [Says], [Malaysiakini], or 【Source】 in title or SEO title. ${input.language === 'zh-CN' ? 'For Chinese-primary output, title, excerpt, SEO fields, and substantive Markdown body must be written in Simplified Chinese; English is allowed only in imageSearchQuery and unavoidable proper names.' : 'For English output, use a clean English editorial headline without publisher prefixes or suffixes.'} Markdown must contain at least five substantive paragraphs before the credit line; never return only a summary, image captions, or the credit line. Include this exact final Markdown credit line in markdown: ${credit} Return a short English imageSearchQuery suitable for stock-photo search. Plan one or two optional supporting stock-image search queries in inlineImages. Each image query must be contextual, contain no text/logo/chart, and use 1-based afterParagraph placement. Return exactly one valid JSON object matching the schema; no reasoning, preamble, or Markdown fences.\n\nSource title: ${input.title}\nSource text:\n${input.body.slice(0, 16_000)}`
   const validateResponse = (raw: string) => {
     try {
       const value = parseAiJson(raw)
@@ -209,7 +251,9 @@ export async function rewriteArticle(input: { sourceName: string; sourceUrl: str
   }
   if (!validation.post && candidate.value && onlyNeedsMetadata(validation)) await recoverMetadata()
   if (!validation.post) throw new Error(`AI rewrite response is incomplete after retry: ${validation.missing.join(', ')}`)
-  return { ...validation.post, markdown: withFinalSourceCredit(validation.post.markdown, credit) }
+  let post = normalizeEditorialPost(validation.post, input.sourceName)
+  if (input.language === 'zh-CN' && chinesePrimaryMissing(post).length) post = await repairChinesePrimary(input, credit)
+  return { ...post, markdown: withFinalSourceCredit(post.markdown, credit) }
 }
 
 export async function classifyArticleCategory(input: { title: string; excerpt: string; categories: string[] }) {
@@ -233,34 +277,4 @@ export async function findSemanticDuplicate(input: { title: string; excerpt: str
   const duplicateIndex = Number(value.duplicateIndex)
   if (!Number.isInteger(duplicateIndex) || duplicateIndex < -1 || duplicateIndex >= input.candidates.length || typeof value.reason !== 'string') throw new Error('AI duplicate check did not return a valid comparison result')
   return duplicateIndex === -1 ? null : { candidate: input.candidates[duplicateIndex]!, reason: value.reason.trim() }
-}
-
-export async function generateNewsImage(prompt: string, purpose: 'cover' | 'inline' = 'cover'): Promise<Buffer | null> {
-  const imagePrompt = `Create an original editorial ${purpose === 'cover' ? 'cover image' : 'supporting illustration'} for this news article. Do not add text, logos, watermarks, charts, or imitate a living artist: ${prompt}`
-  return retry(`${purpose}-image-generation`, async () => {
-    if (usesLocalAi()) {
-      const response = await fetch(new URL('/v1/images/generations', config.OLLAMA_URL), { method: 'POST', headers: { authorization: 'Bearer ollama', 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OLLAMA_IMAGE_MODEL, prompt: imagePrompt, size: '1024x1024', response_format: 'b64_json' }), signal: AbortSignal.timeout(300_000) })
-      if (!response.ok) throw new Error(`Ollama image generation returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
-      const encoded = (await readJsonBody(response, 'Ollama image generation')).data?.[0]?.b64_json
-      if (!encoded) throw new Error('Ollama image response did not contain image data')
-      return Buffer.from(encoded, 'base64')
-    }
-    if (!config.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required before an enabled news bot can generate images')
-    const response = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { authorization: `Bearer ${config.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OPENAI_IMAGE_MODEL, prompt: imagePrompt, size: '1536x1024', response_format: 'b64_json' }), signal: AbortSignal.timeout(300_000) })
-    if (!response.ok) throw new Error(`OpenAI image generation returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
-    const encoded = (await readJsonBody(response, 'OpenAI image generation')).data?.[0]?.b64_json
-    if (!encoded) throw new Error('OpenAI image response did not contain image data')
-    return Buffer.from(encoded, 'base64')
-  })
-}
-
-export async function describeApprovedSourceImage(image: Buffer) {
-  if (!usesLocalAi() || !config.OLLAMA_VISION_MODEL) return null
-  return retry('source-image-description', async () => {
-    const response = await fetch(new URL('/api/chat', config.OLLAMA_URL), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OLLAMA_VISION_MODEL, stream: false, messages: [{ role: 'user', content: 'Describe this news image in a factual visual prompt for a new, original editorial illustration. Do not identify people unless visibly obvious. Return only the visual description.', images: [image.toString('base64')] }] }), signal: AbortSignal.timeout(120_000) })
-    if (!response.ok) throw new Error(`Ollama vision returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
-    const description = String((await readJsonBody(response, 'Ollama vision')).message?.content ?? '').trim()
-    if (!description) throw new Error('Ollama vision response did not contain a description')
-    return description
-  }, 2)
 }

@@ -1,7 +1,5 @@
 import { fileTypeFromBuffer } from 'file-type'
 import { config } from '../config.js'
-import { fetchApprovedSourceImageReference } from './adapters.js'
-import { describeApprovedSourceImage, generateNewsImage } from './openai.js'
 
 export type VisualAsset = {
   image?: Buffer
@@ -15,10 +13,20 @@ export type VisualAsset = {
   attributionName?: string
   attributionUrl?: string
   license?: string
-  visualOrigin: 'PEXELS' | 'PIXABAY' | 'UNSPLASH' | 'SOURCE_REFERENCE_AI' | 'AI_GENERATED'
+  visualOrigin: 'PEXELS' | 'PIXABAY' | 'UNSPLASH' | 'SYSTEM_FALLBACK'
   caption: string
 }
 export type VisualResolution = { asset: VisualAsset | null; attempts: Array<{ stage: string; message: string }> }
+
+const escapeXml = (value: string) => value.replace(/[<>&"']/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[character]!))
+
+/** Creates a local, non-AI fallback cover so an otherwise valid draft never reaches the site without a thumbnail. */
+export function fallbackCoverVisual(input: { title: string; category: string }): VisualAsset {
+  const category = escapeXml(input.category.trim() || 'News').slice(0, 48)
+  const title = escapeXml(input.title.trim() || 'ThePaperLeaf news update').slice(0, 140)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="${title}"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#183d31"/><stop offset="1" stop-color="#2f6650"/></linearGradient><radialGradient id="orb" cx="84%" cy="18%" r="65%"><stop stop-color="#dcecbd" stop-opacity=".95"/><stop offset="1" stop-color="#dcecbd" stop-opacity="0"/></radialGradient></defs><rect width="1200" height="675" fill="url(#bg)"/><rect width="1200" height="675" fill="url(#orb)"/><path d="M0 520C238 400 378 650 625 528S951 423 1200 537V675H0Z" fill="#ffffff" fill-opacity=".09"/><text x="78" y="98" fill="#dcecbd" font-family="Arial, sans-serif" font-size="25" font-weight="700" letter-spacing="5">THEPAPERLEAF</text><text x="78" y="174" fill="#ffffff" font-family="Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="3">${category.toUpperCase()}</text><foreignObject x="78" y="230" width="920" height="280"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial,sans-serif;color:#fff;font-size:54px;font-weight:700;line-height:1.12;letter-spacing:-1px">${title}</div></foreignObject><text x="78" y="608" fill="#ffffff" fill-opacity=".72" font-family="Arial, sans-serif" font-size="20">Editorial cover — stock image review required</text></svg>`
+  return { image: Buffer.from(svg), mimeType: 'image/svg+xml', extension: '.svg', width: 1200, height: 675, provider: 'ThePaperLeaf', license: 'ThePaperLeaf system fallback', visualOrigin: 'SYSTEM_FALLBACK', caption: 'ThePaperLeaf editorial fallback cover. Replace with a reviewed stock image when available.' }
+}
 
 const extensionFor = (mimeType: string) => ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' } as Record<string, string>)[mimeType] || '.png'
 
@@ -75,7 +83,7 @@ async function unsplashVisual(query: string): Promise<VisualAsset | null> {
   return { remoteUrl: photo.urls.regular, mimeType: 'image/jpeg', extension: '.jpg', width: photo.width, height: photo.height, provider: 'Unsplash', providerAssetId: String(photo.id), attributionName: photo.user?.name || undefined, attributionUrl, license: 'Unsplash License (hotlinked)', visualOrigin: 'UNSPLASH', caption: photo.user?.name ? `Photo by ${photo.user.name} on Unsplash.` : 'Photo via Unsplash.' }
 }
 
-export async function resolveVisual(input: { query: string; fallbackQueries?: string[]; prompt: string; purpose: 'cover' | 'inline'; allowSourceReference: boolean; articleUrl: string }): Promise<VisualResolution> {
+export async function resolveVisual(input: { query: string; fallbackQueries?: string[]; purpose: 'cover' | 'inline' }): Promise<VisualResolution> {
   const attempts: VisualResolution['attempts'] = []
   const queries = [...new Set([input.query, ...(input.fallbackQueries ?? [])].map(query => query.trim()).filter(Boolean))].slice(0, 3)
   const providers = [
@@ -97,23 +105,6 @@ export async function resolveVisual(input: { query: string; fallbackQueries?: st
     attempts.push({ stage: `${provider.key}-no-match`, message: `${provider.label} found no matching stock image after ${queries.length} search ${queries.length === 1 ? 'query' : 'queries'}.` })
   }
 
-  if (input.allowSourceReference) {
-    try {
-      const reference = await fetchApprovedSourceImageReference(input.articleUrl)
-      if (reference) {
-        const description = await describeApprovedSourceImage(reference.image)
-        if (description) {
-          const image = await generateNewsImage(`Create a visibly distinct, stylised editorial interpretation of this licensed reference scene: ${description}`, input.purpose)
-          if (image) return { asset: { image, mimeType: 'image/png', extension: '.png', provider: 'Publisher reference', attributionUrl: reference.imageUrl, license: 'Approved publisher reference', visualOrigin: 'SOURCE_REFERENCE_AI', caption: 'Original AI illustration based on an approved publisher image reference.' }, attempts }
-        } else attempts.push({ stage: 'source-reference-skipped', message: 'OLLAMA_VISION_MODEL is not configured, so the approved source image could not be described.' })
-      } else attempts.push({ stage: 'source-reference-no-image', message: 'No publisher image was discovered on the article page.' })
-    } catch (error) { attempts.push({ stage: 'source-reference-failed', message: error instanceof Error ? error.message : 'Approved source image processing failed.' }) }
-  }
-
-  try {
-    const image = await generateNewsImage(input.prompt, input.purpose)
-    if (image) return { asset: { image, mimeType: 'image/png', extension: '.png', provider: 'AI', license: 'Original AI-generated image', visualOrigin: 'AI_GENERATED', caption: input.purpose === 'cover' ? 'Original cover image generated for this article.' : 'Original supporting illustration generated for this article.' }, attempts }
-    attempts.push({ stage: 'ai-image-empty', message: 'AI image generation returned no image data.' })
-  } catch (error) { attempts.push({ stage: 'ai-image-failed', message: error instanceof Error ? error.message : 'AI image generation failed.' }) }
+  attempts.push({ stage: 'stock-image-unavailable', message: 'No matching stock image was found. AI image generation is disabled, so the draft will be created without this visual.' })
   return { asset: null, attempts }
 }

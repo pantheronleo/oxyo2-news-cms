@@ -1,6 +1,6 @@
 export const categorySlug = (value: string) => value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-export const formatDate = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
-export const readingTime = (words: number) => `${Math.max(1, Math.ceil((words || 0) / 220))} min read`
+export const formatDate = (value: string, locale: 'zh-CN' | 'en' = 'zh-CN') => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value))
+export const readingTime = (words: number, locale: 'zh-CN' | 'en' = 'zh-CN') => locale === 'zh-CN' ? `${Math.max(1, Math.ceil((words || 0) / 220))} 分钟阅读` : `${Math.max(1, Math.ceil((words || 0) / 220))} min read`
 export const stripHtml = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 
 export function resolveMediaUrl(url?: string | null) {
@@ -39,7 +39,7 @@ export function removeMeta(name: string, property = false) {
   document.head.querySelector<HTMLMetaElement>(`meta[${property ? 'property' : 'name'}="${name}"]`)?.remove()
 }
 
-export function setSeo({ title, description, image, canonical, type = 'website', noIndex = false, siteName = 'ThePaperLeaf' }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean; siteName?: string }) {
+export function setSeo({ title, description, image, canonical, type = 'website', noIndex = false, siteName = 'ThePaperLeaf', locale = 'zh-CN' }: { title: string; description: string; image?: string; canonical?: string; type?: 'website' | 'article'; noIndex?: boolean; siteName?: string; locale?: 'zh-CN' | 'en' }) {
   const cleanDescription = description.slice(0, 220)
   const url = canonical || (typeof window !== 'undefined' ? window.location.href : '')
   const absoluteImage = absoluteMediaUrl(image)
@@ -54,6 +54,7 @@ export function setSeo({ title, description, image, canonical, type = 'website',
   upsertMeta('og:title', title, true)
   upsertMeta('og:description', cleanDescription, true)
   upsertMeta('og:type', type, true)
+  upsertMeta('og:locale', locale === 'zh-CN' ? 'zh_CN' : 'en_US', true)
   if (url) upsertMeta('og:url', url, true)
 
   upsertMeta('twitter:card', absoluteImage ? 'summary_large_image' : 'summary')

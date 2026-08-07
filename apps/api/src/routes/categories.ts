@@ -3,8 +3,8 @@ import { prisma } from '@cms/database'
 import { requireAdmin } from '../auth.js'
 import { slugify } from '../lib/content.js'
 
-const select={id:true,name:true,slug:true,description:true,color:true,sortOrder:true,isActive:true,createdAt:true,updatedAt:true,_count:{select:{contents:true}}}
-function dataFrom(body:any){const name=String(body.name??'').trim();return{name,slug:slugify(body.slug||name),description:String(body.description??''),color:String(body.color??'#2521E1'),sortOrder:Number(body.sortOrder)||0,isActive:body.isActive!==false}}
+const select={id:true,name:true,nameZh:true,slug:true,description:true,descriptionZh:true,color:true,sortOrder:true,isActive:true,createdAt:true,updatedAt:true,_count:{select:{contents:true}}}
+function dataFrom(body:any){const name=String(body.name??'').trim();return{name,nameZh:String(body.nameZh??'').trim(),slug:slugify(body.slug||name),description:String(body.description??''),descriptionZh:String(body.descriptionZh??''),color:String(body.color??'#2521E1'),sortOrder:Number(body.sortOrder)||0,isActive:body.isActive!==false}}
 
 export async function categoryRoutes(app:FastifyInstance){
   app.addHook('preHandler',requireAdmin)

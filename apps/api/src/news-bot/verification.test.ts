@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { NewsBotItemStatus } from '@cms/database'
 import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
-import { insertInlineImages, isTerminalNewsBotItem, shouldStartRun, sourceFingerprint } from './worker.js'
-import { fallbackMetadataFromMarkdown, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
+import { insertInlineImages, isTerminalNewsBotItem, isWithinWorkingHours, shouldStartRun, sourceFingerprint } from './worker.js'
+import { chinesePrimaryMissing, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
 import { extractSaysArticleBody } from './adapters.js'
 
 const substantialMarkdown = `${'A'.repeat(180)}\n\n${'B'.repeat(180)}`
@@ -20,6 +20,12 @@ describe('news bot verification helpers', () => {
   it('allows paths outside a robots rule', () => expect(robotsAllows('User-agent: *\nDisallow: /private', '/news/story')).toBe(true))
   it('will not schedule work while the bot is disabled', () => expect(shouldStartRun({ enabled: false, lastScheduledAt: null, intervalMinutes: 5 })).toBe(false))
   it('uses the scheduled timestamp rather than run completion time for the next interval', () => expect(shouldStartRun({ enabled: true, lastScheduledAt: new Date('2026-07-22T12:00:00.000Z'), intervalMinutes: 5 }, new Date('2026-07-22T12:05:00.000Z').getTime())).toBe(true))
+  it('only schedules runs inside the configured Malaysia working window', () => {
+    const settings = { workingStartHour: 8, workingEndHour: 0 }
+    expect(isWithinWorkingHours(settings, new Date('2026-07-22T00:30:00.000Z').getTime(), 'Asia/Kuala_Lumpur')).toBe(true)
+    expect(isWithinWorkingHours(settings, new Date('2026-07-22T18:30:00.000Z').getTime(), 'Asia/Kuala_Lumpur')).toBe(false)
+  })
+  it('prevents an otherwise due run outside its working window', () => expect(shouldStartRun({ enabled: true, lastScheduledAt: null, intervalMinutes: 5, workingStartHour: 8, workingEndHour: 0 }, new Date('2026-07-22T18:30:00.000Z').getTime())).toBe(false))
   it('leaves failed bot items eligible for a later retry', () => { expect(isTerminalNewsBotItem(NewsBotItemStatus.FAILED)).toBe(false); expect(isTerminalNewsBotItem(NewsBotItemStatus.CREATED)).toBe(true) })
   it('uses the local AI provider outside production', () => expect(usesLocalAi()).toBe(true))
   it('deduplicates matching source text despite whitespace differences', () => expect(sourceFingerprint({ title: 'Breaking  News', url: 'https://example.com/a', body: 'Same  source\ntext' })).toBe(sourceFingerprint({ title: 'breaking news', url: 'https://example.com/b', body: 'same source text' })))
@@ -32,6 +38,24 @@ describe('news bot verification helpers', () => {
     const metadata = fallbackMetadataFromMarkdown(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`, 'Source headline')
     expect(Object.values(metadata).every(value => value.length > 0)).toBe(true)
     expect(metadata.excerpt).not.toContain('Originally reported by')
+  })
+  it('rejects English copy as a Chinese-primary rewrite', () => {
+    expect(chinesePrimaryMissing({
+      title: 'English headline',
+      excerpt: 'An English excerpt without Chinese translation.',
+      markdown: `${'English article body '.repeat(30)}\n\n${'More English reporting '.repeat(30)}`
+    })).toEqual(expect.arrayContaining(['Chinese title', 'Chinese excerpt', 'Chinese article body']))
+  })
+  it('accepts meaningful Simplified Chinese primary copy', () => {
+    expect(chinesePrimaryMissing({
+      title: '马来西亚推出新的公共交通计划',
+      excerpt: '政府宣布新的公共交通计划，预计将改善城市通勤效率，并在未来数月公布更多执行细节。',
+      markdown: `${'政府今日公布新的公共交通计划，目标是提升城市通勤效率，并改善高峰时段的服务体验。'.repeat(4)}\n\n${'有关部门表示，计划将分阶段落实，公众可在正式发布后查阅相关路线、时间表和执行安排。'.repeat(4)}`
+    })).toEqual([])
+  })
+  it('removes publisher placeholders from editorial headlines', () => {
+    expect(normalizeEditorialTitle('[Malaysiakini] Government announces new transport plan', 'Malaysiakini')).toBe('Government announces new transport plan')
+    expect(normalizeEditorialTitle('【SAYS】新政策将改善城市通勤', 'SAYS')).toBe('新政策将改善城市通勤')
   })
   it('uses a contextual fallback illustration plan when a local model omits inlineImages', () => {
     const post = validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'A market scene', imageSearchQuery: 'market' }).post
