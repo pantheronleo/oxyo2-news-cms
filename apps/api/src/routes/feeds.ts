@@ -12,7 +12,7 @@ const categoryUrl = (slug: string) => siteUrl(`/category/${slug}`)
 export async function feedRoutes(app: FastifyInstance) {
   app.get('/robots.txt', async (_req, reply) => {
     reply.type('text/plain; charset=utf-8').header('Cache-Control', 'public, max-age=300')
-    return reply.send(Readable.from([`User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\n`]))
+    return reply.send(Readable.from([`User-agent: *\nAllow: /\nSitemap: ${siteUrl('/sitemap.xml')}\nSitemap: ${siteUrl('/news-sitemap.xml')}\n`]))
   })
 
   app.get('/llms.txt', async (_req, reply) => {
@@ -65,6 +65,18 @@ Use story title, canonical article URL, publication date, author, and source lab
     return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(url => `  <url><loc>${escapeXml(url.loc)}</loc><lastmod>${url.lastmod.toISOString()}</lastmod></url>`).join('\n')}\n</urlset>\n`
   })
 
+  app.get('/news-sitemap.xml', async (_req, reply) => {
+    // Google News sitemap: only articles published within the last 48 hours.
+    const posts = await prisma.content.findMany({
+      where: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: { lte: new Date(), gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } },
+      select: { title: true, slug: true, publishedAt: true },
+      orderBy: { publishedAt: 'desc' },
+      take: 1000
+    })
+    reply.type('application/xml; charset=utf-8').header('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">\n${posts.map(post => `  <url>\n    <loc>${escapeXml(articleUrl(post.slug))}</loc>\n    <news:news>\n      <news:publication>\n        <news:name>ThePaperLeaf</news:name>\n        <news:language>zh-cn</news:language>\n      </news:publication>\n      <news:publication_date>${post.publishedAt!.toISOString()}</news:publication_date>\n      <news:title>${escapeXml(post.title)}</news:title>\n    </news:news>\n  </url>`).join('\n')}\n</urlset>\n`
+  })
+
   app.get('/rss.xml', async (_req, reply) => {
     const posts = await prisma.content.findMany({
       where: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: { lte: new Date() } },
@@ -73,7 +85,7 @@ Use story title, canonical article URL, publication date, author, and source lab
       take: 50
     })
     reply.type('application/rss+xml; charset=utf-8').header('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">\n  <channel>\n    <title>ThePaperLeaf Magazine News</title>\n    <link>${escapeXml(siteUrl('/'))}</link>\n    <description>Independent magazine-style news, analysis, and editorial explainers.</description>\n    <language>en</language>\n    <atom:link href="${escapeXml(siteUrl('/rss.xml'))}" rel="self" type="application/rss+xml" />\n${posts.map(post => {
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">\n  <channel>\n    <title>ThePaperLeaf Magazine News</title>\n    <link>${escapeXml(siteUrl('/'))}</link>\n    <description>Independent magazine-style news, analysis, and editorial explainers.</description>\n    <language>zh-CN</language>\n    <atom:link href="${escapeXml(siteUrl('/rss.xml'))}" rel="self" type="application/rss+xml" />\n${posts.map(post => {
       const image = post.coverMedia?.url ? new URL(post.coverMedia.url, config.PUBLIC_BASE_URL).toString() : ''
       return `    <item>\n      <title>${escapeXml(post.title)}</title>\n      <link>${escapeXml(articleUrl(post.slug))}</link>\n      <guid isPermaLink="true">${escapeXml(articleUrl(post.slug))}</guid>\n      <description>${escapeXml(post.excerpt || post.html.replace(/<[^>]+>/g, ' ').slice(0, 220))}</description>\n      <pubDate>${(post.publishedAt || post.updatedAt).toUTCString()}</pubDate>\n      <author>${escapeXml(post.authorName || 'Editorial Desk')}</author>\n      <category>${escapeXml(post.categoryRef?.name || post.category || 'General')}</category>${image ? `\n      <media:content url="${escapeXml(image)}" medium="image" />` : ''}\n    </item>`
     }).join('\n')}\n  </channel>\n</rss>\n`

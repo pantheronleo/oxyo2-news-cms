@@ -15,6 +15,7 @@ import { contentRoutes, publicRoutes } from './routes/content.js'
 import { mediaRoutes, serveMedia } from './routes/media.js'
 import { categoryRoutes, publicCategoryRoutes } from './routes/categories.js'
 import { feedRoutes } from './routes/feeds.js'
+import { prerenderRoutes } from './routes/prerender.js'
 import { newsBotRoutes } from './routes/news-bot.js'
 import { startNewsBotScheduler, stopNewsBotScheduler } from './news-bot/worker.js'
 
@@ -31,7 +32,7 @@ export async function buildApp() {
     await admin.register(authRoutes,{prefix:'/auth'}); await admin.register(contentRoutes,{prefix:'/content'}); await admin.register(mediaRoutes,{prefix:'/media'}); await admin.register(categoryRoutes,{prefix:'/categories'}); await admin.register(newsBotRoutes,{prefix:'/news-bot'})
     admin.get('/dashboard',{preHandler:requireAdmin},async()=>{const [drafts,published,scheduled,media]=await prisma.$transaction([prisma.content.count({where:{status:'DRAFT'}}),prisma.content.count({where:{status:'PUBLISHED'}}),prisma.content.count({where:{status:'SCHEDULED'}}),prisma.media.count()]); return{data:{drafts,published,scheduled,media}}})
   },{prefix:'/api/admin'})
-  await app.register(publicRoutes,{prefix:'/api/v1'}); await app.register(publicCategoryRoutes,{prefix:'/api/v1'}); await app.register(feedRoutes); await serveMedia(app)
+  await app.register(publicRoutes,{prefix:'/api/v1'}); await app.register(publicCategoryRoutes,{prefix:'/api/v1'}); await app.register(feedRoutes); await app.register(prerenderRoutes); await serveMedia(app)
   app.setErrorHandler((error,_req,reply)=>{app.log.error(error); const status=(error as any).statusCode??500; reply.code(status).send({error:{code:status===500?'INTERNAL_ERROR':'REQUEST_ERROR',message:status===500?'An unexpected error occurred':error instanceof Error?error.message:'Request failed'}})})
   app.addHook('onClose',()=>{stopNewsBotScheduler();return prisma.$disconnect()}); return app
 }
