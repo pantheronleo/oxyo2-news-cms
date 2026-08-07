@@ -7,8 +7,9 @@ import { useLocale } from '../locale'
 
 export default function SearchPage() {
   const [params] = useSearchParams()
-  const { locale, t } = useLocale()
+  const { locale, link, t } = useLocale()
   const q = params.get('q') ?? ''
-  const { data, loading, error } = useAsync(() => fetchPosts({ search: q, limit: 18, lang: locale }), [q, locale])
-  return <Listing title={q ? t('searchTitle', { query: q }) : t('searchPrompt')} eyebrow={t('results')} posts={data?.data} loading={loading} error={error} noIndex={!q} description={q ? t('searchDescription', { query: q }) : t('searchPrompt')} />
+  const page = Math.max(1, Number(params.get('page')) || 1)
+  const { data, loading, error } = useAsync(() => fetchPosts({ search: q, limit: 18, page, lang: locale }), [q, locale, page])
+  return <Listing title={q ? t('searchTitle', { query: q }) : t('searchPrompt')} eyebrow={t('results')} posts={data?.data} loading={loading} error={error} noIndex={!q} description={q ? t('searchDescription', { query: q }) : t('searchPrompt')} meta={q ? data?.meta : undefined} pageHref={target => link(target > 1 ? `/search?q=${encodeURIComponent(q)}&page=${target}` : `/search?q=${encodeURIComponent(q)}`)} />
 }

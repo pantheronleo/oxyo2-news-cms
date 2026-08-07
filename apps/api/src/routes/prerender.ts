@@ -44,7 +44,7 @@ function template() {
   return cachedTemplate
 }
 
-type HeadInput = { title: string; description: string; canonical: string; image?: string; type?: 'website' | 'article'; locale: Locale; noIndex?: boolean; alternatePath?: string; hasEnglish?: boolean; jsonLd?: unknown[]; article?: { publishedAt: Date | string; modifiedAt: Date | string; section?: string } }
+type HeadInput = { title: string; description: string; canonical: string; image?: string; type?: 'website' | 'article'; locale: Locale; noIndex?: boolean; alternatePath?: string; hasEnglish?: boolean; jsonLd?: unknown[]; article?: { publishedAt: Date | string; modifiedAt: Date | string; section?: string }; pagination?: { basePath: string; page: number; pages: number } }
 function headBlock(input: HeadInput) {
   const description = escapeHtml(input.description.slice(0, 220))
   const image = input.image ? absolute(input.image) : ''
@@ -67,6 +67,11 @@ function headBlock(input: HeadInput) {
   if (input.article) {
     lines.push(`<meta property="article:published_time" content="${new Date(input.article.publishedAt).toISOString()}" />`, `<meta property="article:modified_time" content="${new Date(input.article.modifiedAt).toISOString()}" />`)
     if (input.article.section) lines.push(`<meta property="article:section" content="${escapeHtml(input.article.section)}" />`)
+  }
+  if (input.pagination) {
+    const { basePath, page, pages } = input.pagination
+    if (page > 1) lines.push(`<link rel="prev" href="${escapeHtml(absolute(withLang(pagedPath(basePath, page - 1), input.locale)))}" />`)
+    if (page < pages) lines.push(`<link rel="next" href="${escapeHtml(absolute(withLang(pagedPath(basePath, page + 1), input.locale)))}" />`)
   }
   if (input.alternatePath && input.hasEnglish !== false) lines.push(
     `<link rel="alternate" hreflang="zh-CN" href="${escapeHtml(absolute(input.alternatePath))}" />`,
@@ -117,6 +122,26 @@ async function publishedPosts(q: Record<string, string>, locale: Locale, limit: 
   return items.map(item => localizeContent(item, locale === 'en' ? 'en' : undefined))
 }
 
+async function pagedPosts(q: Record<string, string>, locale: Locale, page: number, limit: number) {
+  const where = publicContentWhere(ContentType.POST, q, new Date()) as any
+  const [items, total] = await prisma.$transaction([
+    prisma.content.findMany({ where, select: listSelect as any, orderBy: [{ isFeatured: 'desc' }, { publishedAt: 'desc' }] as any, skip: (page - 1) * limit, take: limit }),
+    prisma.content.count({ where })
+  ])
+  return { posts: items.map(item => localizeContent(item, locale === 'en' ? 'en' : undefined)), total, pages: Math.max(1, Math.ceil(total / limit)) }
+}
+
+const pageFrom = (query: Record<string, string>) => Math.min(1000, Math.max(1, Number(query.page) || 1))
+const pagedPath = (basePath: string, page: number) => page > 1 ? `${basePath}${basePath.includes('?') ? '&' : '?'}page=${page}` : basePath
+
+function pagerHtml(basePath: string, page: number, pages: number, locale: Locale) {
+  if (pages <= 1) return ''
+  const link = (target: number) => escapeHtml(withLang(pagedPath(basePath, target), locale))
+  const prev = page > 1 ? `<a href="${link(page - 1)}" rel="prev">${locale === 'zh-CN' ? '← 上一页' : '← Previous'}</a>` : '<span></span>'
+  const next = page < pages ? `<a href="${link(page + 1)}" rel="next">${locale === 'zh-CN' ? '下一页 →' : 'Next →'}</a>` : '<span></span>'
+  return `<nav class="pager" aria-label="${locale === 'zh-CN' ? '分页' : 'Pagination'}">${prev}<span class="pager-status">${page} / ${pages}</span>${next}</nav>`
+}
+
 export async function prerenderRoutes(app: FastifyInstance) {
   app.get('/', async (req, reply) => {
     const locale = localeFrom(req.query as Record<string, string>)
@@ -153,12 +178,15 @@ export async function prerenderRoutes(app: FastifyInstance) {
     const categories = await activeCategories()
     const category = categories.find(entry => entry.slug === slug || entry.name.toLowerCase() === slug.toLowerCase())
     if (!category) return notFound(reply, categories, locale)
-    const posts = await publishedPosts({ category: category.slug }, locale, 24)
+    const page = pageFrom(req.query as Record<string, string>)
+    const { posts, pages } = await pagedPosts({ category: category.slug }, locale, page, 18)
+    if (page > 1 && page > pages) return notFound(reply, categories, locale)
     const label = categoryLabel(category, locale)
     const path = `/category/${category.slug}`
     const description = (locale === 'zh-CN' && category.descriptionZh?.trim() ? category.descriptionZh : category.description) || (locale === 'zh-CN' ? `ThePaperLeaf 最新${label}报道。` : `Latest ${label} coverage from ${siteName}.`)
-    const head = headBlock({ title: `${label} — ${siteName}`, description, canonical: absolute(withLang(path, locale)), locale, alternatePath: path, jsonLd: [{ '@context': 'https://schema.org', '@type': 'CollectionPage', name: label, url: absolute(path), description, inLanguage: locale, publisher: publisherJsonLd() }] })
-    const body = `${siteHeader(categories, locale)}<main><section><h1>${escapeHtml(label)}</h1><p>${escapeHtml(description)}</p><div class="latest-grid">${posts.map(post => postListItem(post, locale)).join('')}</div></section></main>${siteFooter(locale)}`
+    const pageSuffix = page > 1 ? (locale === 'zh-CN' ? ` — 第${page}页` : ` — Page ${page}`) : ''
+    const head = headBlock({ title: `${label}${pageSuffix} — ${siteName}`, description, canonical: absolute(withLang(pagedPath(path, page), locale)), locale, alternatePath: pagedPath(path, page), pagination: { basePath: path, page, pages }, jsonLd: [{ '@context': 'https://schema.org', '@type': 'CollectionPage', name: label, url: absolute(pagedPath(path, page)), description, inLanguage: locale, publisher: publisherJsonLd() }] })
+    const body = `${siteHeader(categories, locale)}<main><section><h1>${escapeHtml(label)}${escapeHtml(pageSuffix)}</h1><p>${escapeHtml(description)}</p><div class="latest-grid">${posts.map(post => postListItem(post, locale)).join('')}</div>${pagerHtml(path, page, pages, locale)}</section></main>${siteFooter(locale)}`
     return sendPage(reply, locale, head, body)
   })
 
@@ -186,11 +214,13 @@ export async function prerenderRoutes(app: FastifyInstance) {
   app.get('/search', async (req, reply) => {
     const locale = localeFrom(req.query as Record<string, string>)
     const query = String((req.query as any).q || '').trim().slice(0, 120)
+    const page = pageFrom(req.query as Record<string, string>)
     const categories = await activeCategories()
-    const posts = query ? await publishedPosts({ search: query }, locale, 20) : []
+    const { posts, pages } = query ? await pagedPosts({ search: query }, locale, page, 18) : { posts: [], pages: 1 }
+    const searchBase = query ? `/search?q=${encodeURIComponent(query)}` : '/search'
     const title = query ? (locale === 'zh-CN' ? `搜索：${query} — ${siteName}` : `Search: ${query} — ${siteName}`) : (locale === 'zh-CN' ? `搜索 — ${siteName}` : `Search — ${siteName}`)
     const head = headBlock({ title, description: locale === 'zh-CN' ? `ThePaperLeaf 上“${query}”的搜索结果。` : `Search results for ${query} on ${siteName}.`, canonical: absolute(withLang('/search', locale)), locale, noIndex: true })
-    const body = `${siteHeader(categories, locale)}<main><section><h1>${escapeHtml(title)}</h1><div class="latest-grid">${posts.map(post => postListItem(post, locale)).join('')}</div></section></main>${siteFooter(locale)}`
+    const body = `${siteHeader(categories, locale)}<main><section><h1>${escapeHtml(title)}</h1><div class="latest-grid">${posts.map(post => postListItem(post, locale)).join('')}</div>${query ? pagerHtml(searchBase, page, pages, locale) : ''}</section></main>${siteFooter(locale)}`
     return sendPage(reply, locale, head, body)
   })
 }
