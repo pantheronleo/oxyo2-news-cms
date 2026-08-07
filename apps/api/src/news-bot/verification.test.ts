@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NewsBotItemStatus } from '@cms/database'
 import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
 import { insertInlineImages, isTerminalNewsBotItem, isWithinWorkingHours, shouldStartRun, sourceFingerprint } from './worker.js'
-import { chinesePrimaryMissing, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
+import { chinesePrimaryMissing, duplicateIndexFromAi, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
 import { extractSaysArticleBody } from './adapters.js'
 
 const substantialMarkdown = `${'A'.repeat(180)}\n\n${'B'.repeat(180)}`
@@ -30,6 +30,12 @@ describe('news bot verification helpers', () => {
   it('uses the local AI provider outside production', () => expect(usesLocalAi()).toBe(true))
   it('deduplicates matching source text despite whitespace differences', () => expect(sourceFingerprint({ title: 'Breaking  News', url: 'https://example.com/a', body: 'Same  source\ntext' })).toBe(sourceFingerprint({ title: 'breaking news', url: 'https://example.com/b', body: 'same source text' })))
   it('extracts JSON after local model thinking and prose', () => expect(parseAiJson('<think>internal reasoning</think> Here is the result: {"title":"Story","markdown":"Body"}')).toEqual({ title: 'Story', markdown: 'Body' }))
+  it('accepts only a valid duplicate list index or the no-match sentinel', () => {
+    expect(duplicateIndexFromAi({ duplicateIndex: -1 }, 3)).toBe(-1)
+    expect(duplicateIndexFromAi({ duplicateIndex: '2' }, 3)).toBe(2)
+    expect(duplicateIndexFromAi({ duplicateIndex: null }, 3)).toBeUndefined()
+    expect(duplicateIndexFromAi({ duplicateIndex: 3 }, 3)).toBeUndefined()
+  })
   it('rejects incomplete rewrite payloads before a CMS draft can be created', () => expect(validateRewrittenPost({ title: 'Story', markdown: 'Body' }).missing).toEqual(expect.arrayContaining(['excerpt', 'tags', 'seoTitle', 'seoDescription', 'imagePrompt'])))
   it('does not require an AI category in the rewrite payload', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toEqual([]))
   it('rejects a markdown payload that contains only the mandatory source credit', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: '原文来源：[Says](https://says.com/story)。', tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toContain('substantive markdown body (at least two paragraphs and 320 characters excluding the credit)'))

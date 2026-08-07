@@ -319,12 +319,30 @@ export async function classifyArticleCategory(input: { title: string; excerpt: s
   return null
 }
 
+/** Returns undefined only when an AI response cannot safely be interpreted. */
+export function duplicateIndexFromAi(value: unknown, candidateCount: number) {
+  const raw = (value as { duplicateIndex?: unknown } | null)?.duplicateIndex
+  const index = typeof raw === 'number'
+    ? raw
+    : typeof raw === 'string' && /^-?\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN
+  return Number.isInteger(index) && index >= -1 && index < candidateCount ? index : undefined
+}
+
 export async function findSemanticDuplicate(input: { title: string; excerpt: string; category: string; candidates: Array<{ id: string; title: string; excerpt: string; sourceUrl?: string | null }> }) {
   if (!input.candidates.length) return null
   const list = input.candidates.map((candidate, index) => `${index}. id=${candidate.id}; title=${candidate.title}; excerpt=${candidate.excerpt.slice(0, 500)}; source=${candidate.sourceUrl || 'unknown'}`).join('\n')
   const prompt = `Determine whether the candidate news item reports the same underlying event, announcement, promotion, deal, or development as one recent CMS item in the same category. Treat changed wording, a different publisher, or a different headline as duplicates when the core subject and claim are materially the same. Do not treat general topical similarity as a duplicate. Return duplicateIndex as the matching list index, or -1 when no duplicate exists.\n\nCandidate category: ${input.category}\nCandidate title: ${input.title}\nCandidate excerpt: ${input.excerpt}\n\nRecent CMS items:\n${list}`
-  const value = parseAiJson(await requestJson(prompt, duplicateJsonSchema, 'semantic-duplicate-check'))
-  const duplicateIndex = Number(value.duplicateIndex)
-  if (!Number.isInteger(duplicateIndex) || duplicateIndex < -1 || duplicateIndex >= input.candidates.length || typeof value.reason !== 'string') throw new Error('AI duplicate check did not return a valid comparison result')
-  return duplicateIndex === -1 ? null : { candidate: input.candidates[duplicateIndex]!, reason: value.reason.trim() }
+  for (const stage of ['semantic-duplicate-check', 'semantic-duplicate-repair']) {
+    try {
+      const repair = stage === 'semantic-duplicate-repair' ? `${prompt}\n\nReturn exactly {"duplicateIndex": -1 or a valid list index, "reason": "brief factual reason"}. Do not use null, an id, or any other value for duplicateIndex.` : prompt
+      const value = parseAiJson(await requestJson(repair, duplicateJsonSchema, stage))
+      const duplicateIndex = duplicateIndexFromAi(value, input.candidates.length)
+      if (duplicateIndex === -1) return null
+      if (duplicateIndex !== undefined && typeof value.reason === 'string' && value.reason.trim()) return { candidate: input.candidates[duplicateIndex]!, reason: value.reason.trim() }
+    } catch {
+      // A duplicate check is advisory. An invalid provider response must not fail
+      // a complete article or cause an unverified duplicate to be skipped.
+    }
+  }
+  return null
 }
