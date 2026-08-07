@@ -25,15 +25,18 @@ const articleMetadataJsonSchema = {
   properties: { title: { type: 'string' }, excerpt: { type: 'string' }, seoTitle: { type: 'string' }, seoDescription: { type: 'string' } },
   required: ['title', 'excerpt', 'seoTitle', 'seoDescription']
 }
+const articleAuxiliaryJsonSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    tags: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } },
+    imagePrompt: { type: 'string' }, imageSearchQuery: { type: 'string' }
+  },
+  required: ['tags', 'imagePrompt', 'imageSearchQuery']
+}
 const categoryJsonSchema = { type: 'object', additionalProperties: false, properties: { categoryIndex: { type: 'integer' } }, required: ['categoryIndex'] }
 const duplicateJsonSchema = { type: 'object', additionalProperties: false, properties: { duplicateIndex: { type: 'integer' }, reason: { type: 'string' } }, required: ['duplicateIndex', 'reason'] }
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
-
-function responseText(value: any) {
-  if (typeof value.output_text === 'string') return value.output_text
-  return (value.output ?? []).flatMap((item: any) => item.content ?? []).map((item: any) => item.text ?? '').join('')
-}
 
 async function readJsonBody(response: Response, provider: string) {
   const body = await response.text()
@@ -97,6 +100,18 @@ export function fallbackMetadataFromMarkdown(markdown: string, sourceTitle: stri
   return { title, excerpt, seoTitle: title, seoDescription: excerpt.slice(0, 160) }
 }
 
+type RepairedAuxiliary = Pick<RewrittenPost, 'tags' | 'imagePrompt' | 'imageSearchQuery'>
+
+/** Preserve a complete article when a provider omits non-editorial visual metadata. */
+export function fallbackAuxiliaryFromSource(sourceTitle: string, articleTitle: string): RepairedAuxiliary {
+  const words = sourceTitle.match(/[A-Za-z]{3,}|\d{1,4}/g)?.slice(0, 7).join(' ') || 'editorial news'
+  return {
+    tags: ['news'],
+    imagePrompt: `A factual editorial illustration related to ${articleTitle.slice(0, 120) || 'this news story'}, without text or logos`,
+    imageSearchQuery: words
+  }
+}
+
 const hanCharacters = (value: string) => (value.match(/[\u3400-\u9fff]/g) ?? []).length
 const latinCharacters = (value: string) => (value.match(/[A-Za-z]/g) ?? []).length
 
@@ -152,10 +167,16 @@ async function requestJson(prompt: string, schema: Record<string, unknown>, stag
       if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
       return String((await readJsonBody(response, 'Ollama')).response ?? '')
     }
-    if (!config.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required before the production news bot can process articles')
-    const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${config.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OPENAI_TEXT_MODEL, input: prompt, text: { format: { type: 'json_schema', name: stage.replace(/[^a-z0-9]/gi, '_'), strict: true, schema } } }), signal: AbortSignal.timeout(180_000) })
-    if (!response.ok) throw new Error(`OpenAI returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
-    return responseText(await readJsonBody(response, 'OpenAI'))
+    if (!config.DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY is required before the production news bot can process articles')
+    // DeepSeek rejects JSON mode unless the prompt explicitly contains "json".
+    // Appending this at the provider boundary covers every structured bot stage.
+    const deepSeekPrompt = `${prompt}\n\nReturn a valid JSON object only; do not include any prose or Markdown fences.`
+    const response = await fetch(new URL('/chat/completions', config.DEEPSEEK_API_URL), { method: 'POST', headers: { authorization: `Bearer ${config.DEEPSEEK_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: config.DEEPSEEK_MODEL, messages: [{ role: 'user', content: deepSeekPrompt }], response_format: { type: 'json_object' }, temperature: 0.1, max_tokens: 4096 }), signal: AbortSignal.timeout(180_000) })
+    if (!response.ok) throw new Error(`DeepSeek returned ${response.status}: ${(await response.text()).slice(0, 500)}`)
+    const value = await readJsonBody(response, 'DeepSeek')
+    const content = value?.choices?.[0]?.message?.content
+    if (typeof content !== 'string' || !content.trim()) throw new Error('DeepSeek returned an empty chat completion')
+    return content
   })
 }
 
@@ -180,6 +201,14 @@ async function repairMetadata(input: { title: string; language: ArticleLanguage 
   const fields = ['title', 'excerpt', 'seoTitle', 'seoDescription'] as const
   if (fields.some(field => typeof value?.[field] !== 'string' || !value[field].trim())) throw new Error('metadata repair did not return every required field')
   return Object.fromEntries(fields.map(field => [field, value[field].trim()])) as RepairedMetadata
+}
+
+async function repairAuxiliary(input: { title: string; language: ArticleLanguage }, post: Pick<RewrittenPost, 'title' | 'excerpt' | 'markdown'>): Promise<RepairedAuxiliary> {
+  const prompt = `Create the missing visual and tag metadata for this factual news article. Return exactly one JSON object containing tags, imagePrompt, and imageSearchQuery. tags must contain 1-8 short topical labels. imagePrompt must be an editorial illustration description with no text or logos. imageSearchQuery must be a short English stock-photo search query, even when the article is in Chinese. Do not include a publisher or source name in any field.\n\nArticle title: ${post.title}\nArticle excerpt: ${post.excerpt}\nArticle body:\n${post.markdown.slice(0, 8_000)}\n\nOriginal source title: ${input.title}`
+  const value = parseAiJson(await requestJson(prompt, articleAuxiliaryJsonSchema, `auxiliary-repair-${input.language}`))
+  const tags = Array.isArray(value?.tags) ? value.tags.filter((tag: unknown) => typeof tag === 'string' && tag.trim()).map((tag: string) => tag.trim()).slice(0, 8) : []
+  if (!tags.length || typeof value?.imagePrompt !== 'string' || !value.imagePrompt.trim() || typeof value?.imageSearchQuery !== 'string' || !value.imageSearchQuery.trim()) throw new Error('auxiliary repair did not return every required field')
+  return { tags, imagePrompt: value.imagePrompt.trim(), imageSearchQuery: value.imageSearchQuery.trim() }
 }
 
 async function repairChinesePrimary(input: { sourceName: string; sourceUrl: string; title: string; body: string }, credit: string) {
@@ -207,7 +236,8 @@ export async function rewriteArticle(input: { sourceName: string; sourceUrl: str
   }
   const needsBodyRepair = (validation: ReturnType<typeof validateRewrittenPost>) => validation.missing.some(field => field.startsWith('substantive markdown body'))
   const metadataFields = new Set(['title', 'excerpt', 'seoTitle', 'seoDescription'])
-  const onlyNeedsMetadata = (validation: ReturnType<typeof validateRewrittenPost>) => validation.missing.length > 0 && validation.missing.every(field => metadataFields.has(field))
+  const auxiliaryFields = new Set(['tags', 'imagePrompt', 'imageSearchQuery'])
+  const onlyNeedsRecoverableFields = (validation: ReturnType<typeof validateRewrittenPost>) => validation.missing.length > 0 && validation.missing.every(field => metadataFields.has(field) || auxiliaryFields.has(field))
 
   let raw = await requestJson(prompt, rewriteJsonSchema, `rewrite-${input.language}`)
   let candidate = validateResponse(raw)
@@ -223,6 +253,26 @@ export async function rewriteArticle(input: { sourceName: string; sourceUrl: str
     }
     validation = validateRewrittenPost(candidate.value)
   }
+  const recoverAuxiliary = async () => {
+    if (!candidate.value || typeof candidate.value.markdown !== 'string') return
+    const metadata = fallbackMetadataFromMarkdown(candidate.value.markdown, input.title)
+    const post = {
+      title: typeof candidate.value.title === 'string' && candidate.value.title.trim() ? candidate.value.title.trim() : metadata.title,
+      excerpt: typeof candidate.value.excerpt === 'string' && candidate.value.excerpt.trim() ? candidate.value.excerpt.trim() : metadata.excerpt,
+      markdown: candidate.value.markdown
+    }
+    try {
+      Object.assign(candidate.value, await repairAuxiliary(input, post))
+    } catch {
+      // Search metadata must not discard otherwise publishable source reporting.
+      Object.assign(candidate.value, fallbackAuxiliaryFromSource(input.title, post.title))
+    }
+    validation = validateRewrittenPost(candidate.value)
+  }
+  const recoverOptionalFields = async () => {
+    if (validation.missing.some(field => metadataFields.has(field))) await recoverMetadata()
+    if (!validation.post && validation.missing.some(field => auxiliaryFields.has(field))) await recoverAuxiliary()
+  }
 
   // A short body is a common local-model failure. Keep the otherwise valid response
   // and repair only markdown, rather than making the model reproduce the whole schema.
@@ -234,7 +284,7 @@ export async function rewriteArticle(input: { sourceName: string; sourceUrl: str
       // The complete-schema retry below is still useful when a compact repair fails.
     }
   }
-  if (!validation.post && candidate.value && onlyNeedsMetadata(validation)) await recoverMetadata()
+  if (!validation.post && candidate.value && onlyNeedsRecoverableFields(validation)) await recoverOptionalFields()
 
   if (!validation.post) {
     raw = await requestJson(`${prompt}\n\nYour previous response was incomplete. Return the complete JSON object now. Required fields: ${validation.missing.join(', ')}.`, rewriteJsonSchema, `rewrite-repair-${input.language}`)
@@ -249,7 +299,7 @@ export async function rewriteArticle(input: { sourceName: string; sourceUrl: str
       // Surface the original validation reason below, which is actionable in the run log.
     }
   }
-  if (!validation.post && candidate.value && onlyNeedsMetadata(validation)) await recoverMetadata()
+  if (!validation.post && candidate.value && onlyNeedsRecoverableFields(validation)) await recoverOptionalFields()
   if (!validation.post) throw new Error(`AI rewrite response is incomplete after retry: ${validation.missing.join(', ')}`)
   let post = normalizeEditorialPost(validation.post, input.sourceName)
   if (input.language === 'zh-CN' && chinesePrimaryMissing(post).length) post = await repairChinesePrimary(input, credit)

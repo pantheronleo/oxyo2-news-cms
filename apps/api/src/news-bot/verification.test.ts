@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NewsBotItemStatus } from '@cms/database'
 import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
 import { insertInlineImages, isTerminalNewsBotItem, isWithinWorkingHours, shouldStartRun, sourceFingerprint } from './worker.js'
-import { chinesePrimaryMissing, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
+import { chinesePrimaryMissing, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
 import { extractSaysArticleBody } from './adapters.js'
 
 const substantialMarkdown = `${'A'.repeat(180)}\n\n${'B'.repeat(180)}`
@@ -38,6 +38,12 @@ describe('news bot verification helpers', () => {
     const metadata = fallbackMetadataFromMarkdown(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`, 'Source headline')
     expect(Object.values(metadata).every(value => value.length > 0)).toBe(true)
     expect(metadata.excerpt).not.toContain('Originally reported by')
+  })
+  it('derives safe stock-search metadata when an AI provider omits tags or image fields', () => {
+    const auxiliary = fallbackAuxiliaryFromSource('Airasia announces a 50 percent flight discount', '亚航推出机票优惠')
+    expect(auxiliary.tags).toEqual(['news'])
+    expect(auxiliary.imageSearchQuery).toBe('Airasia announces 50 percent flight discount')
+    expect(auxiliary.imagePrompt).toContain('亚航推出机票优惠')
   })
   it('rejects English copy as a Chinese-primary rewrite', () => {
     expect(chinesePrimaryMissing({

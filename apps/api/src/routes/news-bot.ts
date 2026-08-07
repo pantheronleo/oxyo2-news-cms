@@ -39,8 +39,9 @@ export async function newsBotRoutes(app: FastifyInstance) {
     return { data, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
   })
   app.get('/runs/:id', async (req, reply) => {
+    const id = (req.params as any).id as string
     const run = await prisma.newsBotRun.findUnique({
-      where: { id: (req.params as any).id },
+      where: { id },
       include: {
         logs: { orderBy: { createdAt: 'asc' }, take: 300, include: { source: { select: { id: true, name: true, sourceLabel: true, feedUrl: true } } }, },
         items: {
@@ -48,7 +49,9 @@ export async function newsBotRoutes(app: FastifyInstance) {
           include: {
             source: { select: { id: true, name: true, sourceLabel: true, feedUrl: true } },
             content: { select: { id: true, title: true, slug: true, status: true, excerpt: true, sourceUrl: true, visualNeedsReview: true, translations: { select: { language: true } }, coverMedia: { select: { url: true } } } },
-            logs: { orderBy: { createdAt: 'asc' } }
+            // Retried items retain their historical logs. Show only events written
+            // during this selected run, not events from earlier retry attempts.
+            logs: { where: { runId: id }, orderBy: { createdAt: 'asc' } }
           }
         }
       }

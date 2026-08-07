@@ -120,7 +120,7 @@ async function processArticle(source: Source, runId: string, article: Article, c
   }
   try {
     if (!article.body || article.body.length < 200) throw new Error('Feed item does not provide enough source text for a rewrite')
-    await log(runId, NewsBotLogLevel.INFO, 'rewrite-started', `Creating Chinese and English rewrites with ${usesLocalAi() ? 'Ollama' : 'OpenAI'}.`, { model: usesLocalAi() ? config.OLLAMA_MODEL : config.OPENAI_TEXT_MODEL }, source.id, item.id)
+    await log(runId, NewsBotLogLevel.INFO, 'rewrite-started', `Creating Chinese and English rewrites with ${usesLocalAi() ? 'Ollama' : 'DeepSeek'}.`, { model: usesLocalAi() ? config.OLLAMA_MODEL : config.DEEPSEEK_MODEL }, source.id, item.id)
     const chinese = await rewriteArticle({ sourceName: source.sourceLabel, sourceUrl, title: article.title, body: article.body, language: 'zh-CN' })
     await log(runId, NewsBotLogLevel.INFO, 'rewrite-complete', 'Chinese-primary rewrite completed successfully.', { language: 'zh-CN', title: chinese.title, wordCount: wordCount(chinese.markdown) }, source.id, item.id)
     const availableCategories = categories.length ? categories : [{ id: source.categoryId || '', name: source.category }]
@@ -244,7 +244,7 @@ export async function runNewsBotOnce() {
   const sources = await prisma.newsBotSource.findMany({ where: { isEnabled: true }, select: { id: true, name: true, feedUrl: true, sourceLabel: true, category: true, categoryId: true } })
   const categories = await prisma.category.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
   const counts: Counts = { processed: 0, created: 0, skipped: 0, failed: 0 }
-  await log(candidate.run.id, NewsBotLogLevel.INFO, 'run-started', 'News bot run started.', { trigger: candidate.run.trigger, enabledSources: sources.length, aiProvider: usesLocalAi() ? 'ollama' : 'openai' })
+  await log(candidate.run.id, NewsBotLogLevel.INFO, 'run-started', 'News bot run started.', { trigger: candidate.run.trigger, enabledSources: sources.length, aiProvider: usesLocalAi() ? 'ollama' : 'deepseek', model: usesLocalAi() ? config.OLLAMA_MODEL : config.DEEPSEEK_MODEL })
   for (const source of sources) { if (await isRunCancelled(candidate.run.id)) break; try { await processSource(source, candidate.run.id, candidate.settings.articleLimit, counts, categories) } catch (error) { counts.failed++; await log(candidate.run.id, NewsBotLogLevel.ERROR, 'source-failed', error instanceof Error ? error.message : 'Source processing failed', { source: source.name }, source.id) } }
   const cancelled = await isRunCancelled(candidate.run.id)
   const status = cancelled ? NewsBotRunStatus.CANCELLED : counts.failed ? (counts.created || counts.skipped ? NewsBotRunStatus.PARTIAL : NewsBotRunStatus.FAILED) : NewsBotRunStatus.SUCCEEDED

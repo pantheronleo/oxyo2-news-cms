@@ -60,7 +60,7 @@ The demo news seed uses remote Unsplash image URLs for thumbnails and in-article
    chmod 600 .env.production
    ```
 
-   Set `PUBLIC_BASE_URL` to the public news HTTPS origin, `ADMIN_ORIGIN` to the CMS admin HTTPS origin, and `UPLOAD_DIR=/home/ubuntu/apps/cms/shared/uploads`. `OPENAI_API_KEY` is required before production news-bot processing can run. Add stock provider keys only for the providers you intend to use; the fallback order is Pexels, Pixabay, Unsplash, then AI generation. This file is never synchronized.
+   Set `PUBLIC_BASE_URL` to the public news HTTPS origin, `ADMIN_ORIGIN` to the CMS admin HTTPS origin, and `UPLOAD_DIR=/home/ubuntu/apps/cms/shared/uploads`. `DEEPSEEK_API_KEY` is required before production news-bot processing can run; use `DEEPSEEK_API_URL=https://api.deepseek.com` and `DEEPSEEK_MODEL=deepseek-chat`. Add stock provider keys only for the providers you intend to use; the fallback order is Pexels, Pixabay, Unsplash, then the built-in non-AI fallback. This file is never synchronized.
 4. Replace `CMS_ADMIN_DOMAIN` and `NEWS_DOMAIN` in `deploy/nginx.conf`, copy it to `/etc/nginx/sites-available/cms`, enable it, test with `sudo nginx -t`, and reload Nginx.
 5. Configure HTTPS with Certbot (`sudo apt install certbot python3-certbot-nginx && sudo certbot --nginx -d admin-domain -d news-domain`). Secure cookies require HTTPS in production.
 6. Seed once on the server: `set -a; source .env.production; set +a; pnpm db:seed`.
