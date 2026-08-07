@@ -22,4 +22,5 @@ export const config = z.object({
   OLLAMA_URL: z.string().url().default('http://localhost:11434'), OLLAMA_MODEL: z.string().default('deepseek-r1:latest'),
   PEXELS_API_KEY: z.string().optional(), PIXABAY_API_KEY: z.string().optional(), UNSPLASH_ACCESS_KEY: z.string().optional(),
   NEWS_BOT_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(15).default(60), NEWS_BOT_TIMEZONE: z.string().default('Asia/Kuala_Lumpur'),
+  INDEXNOW_KEY: z.string().optional(),
 }).parse(process.env)

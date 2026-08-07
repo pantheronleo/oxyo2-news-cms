@@ -44,6 +44,20 @@ async function persistProgress(runId: string, counts: Counts) {
 }
 
 function sourceDate(value?: string) { const date = value ? new Date(value) : null; return date && !Number.isNaN(date.getTime()) ? date : null }
+
+/** Notifies IndexNow-participating engines (Bing feeds ChatGPT Search) about new URLs. Failures are ignored. */
+async function pingIndexNow(paths: string[]) {
+  if (!config.INDEXNOW_KEY) return
+  try {
+    const host = new URL(config.PUBLIC_BASE_URL).host
+    await fetch('https://api.indexnow.org/indexnow', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ host, key: config.INDEXNOW_KEY, keyLocation: new URL(`/${config.INDEXNOW_KEY}.txt`, config.PUBLIC_BASE_URL).toString(), urlList: paths.map(path => new URL(path, config.PUBLIC_BASE_URL).toString()) }),
+      signal: AbortSignal.timeout(10_000)
+    })
+  } catch { /* advisory ping; never fail the article */ }
+}
 export function sourceFingerprint(article: Article) { return createHash('sha256').update(`${article.title.toLowerCase().replace(/\s+/g, ' ').trim()}\n${article.body.toLowerCase().replace(/\s+/g, ' ').trim()}`).digest('hex') }
 
 async function saveVisualAsset(asset: VisualAsset, title: string, kind: 'cover' | 'inline', index?: number) {
@@ -170,6 +184,7 @@ async function processArticle(source: Source, runId: string, article: Article, c
     const visualNeedsReview = usedFallbackCover || !inlineImages.length
     const content = await prisma.content.create({ data: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: new Date(), title: chinese.title, slug: await uniqueSlug(chinese.title, randomUUID().slice(0, 6)), excerpt: chinese.excerpt, category: category.name, categoryId: category.id || null, authorName: 'Editorial Desk', sourceLabel: source.sourceLabel, sourceUrl, markdown: chineseMarkdown, html: renderMarkdown(chineseMarkdown), wordCount: wordCount(chineseMarkdown), tags: chinese.tags, seoTitle: chinese.seoTitle, seoDescription: chinese.seoDescription, coverMediaId: cover.id, visualNeedsReview, translations: english && englishMarkdown ? { create: { language: ContentLanguage.EN, title: english.title, excerpt: english.excerpt, markdown: englishMarkdown, html: renderMarkdown(englishMarkdown), wordCount: wordCount(englishMarkdown), seoTitle: english.seoTitle, seoDescription: english.seoDescription } } : undefined } })
     await prisma.newsBotItem.update({ where: { id: item.id }, data: { status: NewsBotItemStatus.CREATED, contentId: content.id, error: null } })
+    void pingIndexNow([`/article/${content.slug}`, '/'])
     await log(runId, visualNeedsReview ? NewsBotLogLevel.WARN : NewsBotLogLevel.INFO, 'draft-created', 'Created and published a Chinese-primary CMS post.', { contentId: content.id, slug: content.slug, hasCover: Boolean(cover), inlineImageCount: inlineImages.length, englishTranslation: Boolean(english), visualNeedsReview }, source.id, item.id)
     return 'created'
   } catch (error) {
