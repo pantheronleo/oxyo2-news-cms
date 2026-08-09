@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Pencil, Play, Plus, RefreshCw, Save, Square, Trash2, X } from 'lucide-react'
 import { api } from '../lib/api'
 
@@ -16,25 +16,51 @@ const logTone = (log: Log) => log.level === 'ERROR' ? 'error' : log.level === 'W
 
 export function NewsBotPage() {
   const [settings, setSettings] = useState<Settings>({ enabled: false, intervalMinutes: 120, articleLimit: null, workingStartHour: 8, workingEndHour: 0 })
-  const [sources, setSources] = useState<Source[]>([]); const [runs, setRuns] = useState<Run[]>([]); const [runPage, setRunPage] = useState(1); const [runMeta, setRunMeta] = useState<RunPage['meta']>({ page: 1, limit: 10, total: 0, totalPages: 1 }); const [draft, setDraft] = useState(empty); const [editingId, setEditingId] = useState<string | null>(null); const [selected, setSelected] = useState<RunDetail | null>(null); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
-  const loadRuns = (page = runPage) => api<RunPage>(`/admin/news-bot/runs?page=${page}&limit=10`).then(result => { setRuns(result.data); setRunMeta(result.meta) })
-  const load = (page = runPage) => Promise.all([api<{data:Settings}>('/admin/news-bot/settings'), api<{data:Source[]}>('/admin/news-bot/sources'), api<RunPage>(`/admin/news-bot/runs?page=${page}&limit=10`)]).then(([a,b,c]) => { setSettings(a.data); setSources(b.data); setRuns(c.data); setRunMeta(c.meta) })
-  useEffect(() => { void load() }, [])
-  useEffect(() => { const timer = window.setInterval(() => void loadRuns(runPage), 5_000); return () => window.clearInterval(timer) }, [runPage])
+  const [sources, setSources] = useState<Source[]>([]); const [runs, setRuns] = useState<Run[]>([]); const [runPage, setRunPage] = useState(1); const [runMeta, setRunMeta] = useState<RunPage['meta']>({ page: 1, limit: 10, total: 0, totalPages: 1 }); const [runsLoading, setRunsLoading] = useState(false); const [draft, setDraft] = useState(empty); const [editingId, setEditingId] = useState<string | null>(null); const [selected, setSelected] = useState<RunDetail | null>(null); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
+  const runPageRef = useRef(1)
+  const runRequestRef = useRef(0)
+  const loadRuns = useCallback(async (page = runPageRef.current) => {
+    const requestId = ++runRequestRef.current
+    setRunsLoading(true)
+    try {
+      const result = await api<RunPage>(`/admin/news-bot/runs?page=${page}&limit=10`)
+      // A slower refresh for an old page must never replace a page the user has selected since.
+      if (requestId !== runRequestRef.current || page !== runPageRef.current) return
+      setRuns(result.data)
+      setRunMeta(result.meta)
+    } finally {
+      if (requestId === runRequestRef.current) setRunsLoading(false)
+    }
+  }, [])
+  const loadDashboard = useCallback(async () => {
+    const [settingsResult, sourcesResult] = await Promise.all([api<{data:Settings}>('/admin/news-bot/settings'), api<{data:Source[]}>('/admin/news-bot/sources')])
+    setSettings(settingsResult.data)
+    setSources(sourcesResult.data)
+  }, [])
+  const refresh = useCallback(async () => { await Promise.all([loadDashboard(), loadRuns(runPageRef.current)]) }, [loadDashboard, loadRuns])
+  const changeRunPage = (page: number) => {
+    const nextPage = Math.max(1, Math.min(runMeta.totalPages, page))
+    if (nextPage === runPageRef.current) return
+    runPageRef.current = nextPage
+    setRunPage(nextPage)
+    void loadRuns(nextPage)
+  }
+  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { const timer = window.setInterval(() => void loadRuns(runPageRef.current), 5_000); return () => window.clearInterval(timer) }, [loadRuns])
   const saveSettings = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setMessage(''); try { const result = await api<{data:Settings}>('/admin/news-bot/settings', { method: 'PATCH', body: JSON.stringify(settings) }); setSettings(result.data); setMessage('Bot settings saved.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not save settings') } finally { setBusy(false) } }
   const pauseScheduling = async () => { setBusy(true); setMessage(''); try { const result = await api<{data:Settings}>('/admin/news-bot/settings', { method: 'PATCH', body: JSON.stringify({ ...settings, enabled: false }) }); setSettings(result.data); setMessage('Scheduling paused. No future automated runs will start; stop an active run from its details.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not pause scheduling') } finally { setBusy(false) } }
-  const saveSource = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setMessage(''); try { await api(editingId ? `/admin/news-bot/sources/${editingId}` : '/admin/news-bot/sources', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify(draft) }); setDraft(empty); setEditingId(null); await load(); setMessage(editingId ? 'Source updated.' : 'Source added. Keep it disabled until verification and approval are complete.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not save source') } finally { setBusy(false) } }
+  const saveSource = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setMessage(''); try { await api(editingId ? `/admin/news-bot/sources/${editingId}` : '/admin/news-bot/sources', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify(draft) }); setDraft(empty); setEditingId(null); await refresh(); setMessage(editingId ? 'Source updated.' : 'Source added. Keep it disabled until verification and approval are complete.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not save source') } finally { setBusy(false) } }
   const editSource = (source: Source) => { setEditingId(source.id); setDraft({ name: source.name, feedUrl: source.feedUrl, sourceLabel: source.sourceLabel, category: source.category, isEnabled: source.isEnabled }) }
   const cancelEdit = () => { setEditingId(null); setDraft(empty) }
-  const removeSource = async (source: Source) => { if (!confirm(`Delete ${source.name}?`)) return; try { await api(`/admin/news-bot/sources/${source.id}`, { method: 'DELETE' }); await load(); setMessage('Source deleted.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not delete source') } }
-  const runNow = async () => { setBusy(true); setMessage(''); try { const result = await api<{data:Run}>('/admin/news-bot/runs', { method: 'POST' }); setSettings(current => ({ ...current, enabled: true })); setMessage('Scheduled automation started. Its first run is starting now and future runs follow your configured interval.'); await load(); await openRun(result.data.id) } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not start scheduled automation') } finally { setBusy(false) } }
-  const stopRun = async (id: string) => { setBusy(true); try { const result = await api<{data:Run}>(`/admin/news-bot/runs/${id}/stop`, { method: 'POST' }); setMessage('Stop requested. The active article, if any, will stop after its current network request.'); await load(); await openRun(result.data.id) } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not stop this run') } finally { setBusy(false) } }
+  const removeSource = async (source: Source) => { if (!confirm(`Delete ${source.name}?`)) return; try { await api(`/admin/news-bot/sources/${source.id}`, { method: 'DELETE' }); await refresh(); setMessage('Source deleted.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not delete source') } }
+  const runNow = async () => { setBusy(true); setMessage(''); try { const result = await api<{data:Run}>('/admin/news-bot/runs', { method: 'POST' }); setSettings(current => ({ ...current, enabled: true })); setMessage('Scheduled automation started. Its first run is starting now and future runs follow your configured interval.'); runPageRef.current = 1; setRunPage(1); await refresh(); await openRun(result.data.id) } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not start scheduled automation') } finally { setBusy(false) } }
+  const stopRun = async (id: string) => { setBusy(true); try { const result = await api<{data:Run}>(`/admin/news-bot/runs/${id}/stop`, { method: 'POST' }); setMessage('Stop requested. The active article, if any, will stop after its current network request.'); await refresh(); await openRun(result.data.id) } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not stop this run') } finally { setBusy(false) } }
   const openRun = async (id: string) => { try { const result = await api<{data:RunDetail}>(`/admin/news-bot/runs/${id}`); setSelected(result.data) } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not load run details') } }
   useEffect(() => { if (!selected) return; const timer = window.setInterval(() => void openRun(selected.id), 5_000); return () => window.clearInterval(timer) }, [selected?.id])
   const hasActiveRun = runs.some(run => run.status === 'QUEUED' || run.status === 'RUNNING')
   const schedulingActive = settings.enabled
   return <>
-    <div className="title-row"><div><span className="eyebrow">Automation</span><h1>News bot</h1><p>Manage feeds, watch every processing step, and review generated drafts.</p></div><button className="secondary" onClick={() => void load()}><RefreshCw />Refresh</button></div>
+    <div className="title-row"><div><span className="eyebrow">Automation</span><h1>News bot</h1><p>Manage feeds, watch every processing step, and review generated drafts.</p></div><button className="secondary" onClick={() => void refresh()}><RefreshCw />Refresh</button></div>
     {message && <div className="notice">{message}</div>}
     <div className="bot-grid">
       <section className="panel setting"><span className="setting-icon"><Bot /></span><h2>Run settings</h2><p>The CMS queues one scheduled run at this interval. A blank article limit means all unseen feed items.</p><form onSubmit={saveSettings}>
@@ -48,7 +74,7 @@ export function NewsBotPage() {
       <section className="panel setting"><h2>{editingId ? 'Edit source' : 'Add approved source'}</h2><p>Use the publisher’s official RSS or Atom feed. You can edit, disable, or delete sources at any time.</p><form onSubmit={saveSource}><label>Publisher name<input required value={draft.name} onChange={event => setDraft({...draft, name: event.target.value})}/></label><label>Feed URL<input required type="url" placeholder="https://publisher.example/feed/" value={draft.feedUrl} onChange={event => setDraft({...draft, feedUrl: event.target.value})}/></label><label>Credit label<input value={draft.sourceLabel} onChange={event => setDraft({...draft, sourceLabel: event.target.value})} placeholder="Publisher name"/></label><label>Category<input value={draft.category} onChange={event => setDraft({...draft, category: event.target.value})}/></label><label className="check-row"><input type="checkbox" checked={draft.isEnabled} onChange={event => setDraft({...draft, isEnabled: event.target.checked})}/><span>Enable this source</span></label><div className="bot-form-actions"><button className="primary" disabled={busy}>{editingId ? <><Save />Save source</> : <><Plus />Add source</>}</button>{editingId && <button type="button" className="secondary" onClick={cancelEdit}><X />Cancel</button>}</div></form></section>
     </div>
     <section className="panel bot-panel"><h2>Configured sources</h2><div className="bot-list">{sources.map(source => <div className="bot-source" key={source.id}><span><b>{source.name}</b><small>{source.feedUrl} · {source.category}</small></span><em className={`badge ${source.isEnabled ? 'published' : 'draft'}`}>{source.isEnabled ? 'ENABLED' : 'DISABLED'}</em><span className="bot-actions"><button className="ghost" title={`Edit ${source.name}`} onClick={() => editSource(source)}><Pencil /></button><button className="ghost" title={`Delete ${source.name}`} onClick={() => void removeSource(source)}><Trash2 /></button></span></div>)}{!sources.length && <div className="empty">No sources configured. Add an approved feed to begin.</div>}</div></section>
-    <section className="panel bot-panel"><div className="recent-runs-head"><div><h2>Recent runs</h2><small>Updates automatically every 5 seconds</small></div><small>{runMeta.total} total</small></div><div className="bot-list">{runs.map(run => <button className={`bot-source bot-run-row ${selected?.id === run.id ? 'active' : ''}`} key={run.id} onClick={() => void openRun(run.id)}><span><b>SCHEDULED · {run.status}</b><small>{format(run.createdAt)} · {run.processedCount} processed · {run.createdCount} drafts · {run.skippedCount} skipped · {run.failedCount} failed · {run._count?.logs ?? 0} log events</small>{run.error && <small className="run-error">{run.error}</small>}</span><em className={`badge ${run.status.toLowerCase()}`}>{run.status}</em></button>)}{!runs.length && <div className="empty">No bot runs have been recorded.</div>}</div>{runMeta.totalPages > 1 && <nav className="run-pagination" aria-label="Recent runs pages"><button className="secondary" disabled={runPage <= 1} onClick={() => setRunPage(runPage - 1)}><ChevronLeft />Previous</button><span>Page {runMeta.page} of {runMeta.totalPages}</span><button className="secondary" disabled={runPage >= runMeta.totalPages} onClick={() => setRunPage(runPage + 1)}>Next<ChevronRight /></button></nav>}</section>
+    <section className="panel bot-panel"><div className="recent-runs-head"><div><h2>Recent runs</h2><small>{runsLoading ? `Loading page ${runPage}…` : 'Updates automatically every 5 seconds'}</small></div><small>{runMeta.total} total</small></div><div className="bot-list" aria-busy={runsLoading}>{runs.map(run => <button className={`bot-source bot-run-row ${selected?.id === run.id ? 'active' : ''}`} key={run.id} onClick={() => void openRun(run.id)}><span><b>SCHEDULED · {run.status}</b><small>{format(run.createdAt)} · {run.processedCount} processed · {run.createdCount} drafts · {run.skippedCount} skipped · {run.failedCount} failed · {run._count?.logs ?? 0} log events</small>{run.error && <small className="run-error">{run.error}</small>}</span><em className={`badge ${run.status.toLowerCase()}`}>{run.status}</em></button>)}{!runs.length && <div className="empty">No bot runs have been recorded.</div>}</div>{runMeta.totalPages > 1 && <nav className="run-pagination" aria-label="Recent runs pages"><button className="secondary" disabled={runsLoading || runPage <= 1} onClick={() => changeRunPage(runPage - 1)}><ChevronLeft />Previous</button><span>Page {runPage} of {runMeta.totalPages}</span><button className="secondary" disabled={runsLoading || runPage >= runMeta.totalPages} onClick={() => changeRunPage(runPage + 1)}>Next<ChevronRight /></button></nav>}</section>
     {selected && <RunDashboard run={selected} busy={busy} close={() => setSelected(null)} stop={() => void stopRun(selected.id)} />}
   </>
 }

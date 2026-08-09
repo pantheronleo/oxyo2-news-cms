@@ -525,9 +525,9 @@ footer{border-top:1px solid var(--line);padding:35px max(20px,calc((100vw - 1200
   .logo{width:100%;font-size:24px}
   .header-actions{order:2;width:100%}
   .top-search{order:2;width:100%;min-height:44px}
-  .header-actions .top-search{width:auto;flex:1}
+  .header-actions .top-search{width:auto;flex:1;min-width:0;max-width:100%;overflow:hidden}
   .top-search input{width:100%;min-width:0}
-  .top-search button{min-height:40px;padding-inline:16px}
+  .top-search button{flex:0 0 auto;min-width:56px;min-height:36px;height:36px;padding-inline:12px;white-space:nowrap}
   .site-header nav{
     order:3;
     flex:0 0 100%;
