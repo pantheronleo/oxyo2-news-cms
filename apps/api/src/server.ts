@@ -20,7 +20,7 @@ import { newsBotRoutes } from './routes/news-bot.js'
 import { startNewsBotScheduler, stopNewsBotScheduler } from './news-bot/worker.js'
 
 export async function buildApp() {
-  const app=Fastify({logger:{level:config.NODE_ENV==='production'?'info':'debug'},bodyLimit:2*1024*1024,trustProxy:true})
+  const app=Fastify({logger:{level:config.NODE_ENV==='production'?'info':'debug'},bodyLimit:2*1024*1024,trustProxy:true,ignoreTrailingSlash:true})
   await app.register(helmet,{contentSecurityPolicy:false}); await app.register(cors,{origin:config.ADMIN_ORIGIN,credentials:true}); await app.register(cookie)
   await app.register(session,{secret:config.SESSION_SECRET,cookieName:'cms.sid',cookie:{secure:config.NODE_ENV==='production',httpOnly:true,sameSite:'lax',maxAge:86400000},saveUninitialized:false})
   await app.register(csrf,{sessionPlugin:'@fastify/session'}); await app.register(rateLimit,{global:false}); await app.register(multipart,{limits:{fileSize:config.MAX_UPLOAD_BYTES,files:1}})

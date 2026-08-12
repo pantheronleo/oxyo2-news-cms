@@ -2,7 +2,7 @@ import React from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { fetchPosts, type Category, type Post } from '../newsApi'
 import { resolveMediaUrl } from '../utils'
-import { ArticleCard, EmptyCopy, ErrorView, Loading, SectionTitle, Seo, absoluteUrl, useAsync } from '../viewShared'
+import { ArticleCard, Breadcrumb, type BreadcrumbItem, EmptyCopy, ErrorView, JsonLd, Loading, SectionTitle, Seo, absoluteUrl, breadcrumbJsonLd, useAsync } from '../viewShared'
 import { categoryDescription, categoryLabel, useLocale } from '../locale'
 
 export default function CategoryPage({ categories }: { categories: Category[] }) {
@@ -14,14 +14,15 @@ export default function CategoryPage({ categories }: { categories: Category[] })
   const readable = match ? categoryLabel(match, locale) : category.replaceAll('-', ' ')
   const query = match?.slug ?? category
   const { data, loading, error } = useAsync(() => fetchPosts({ category: query, limit: 18, page, lang: locale }), [query, locale, page])
-  return <Listing title={readable} eyebrow={t('category')} posts={data?.data} loading={loading} error={error} description={match ? categoryDescription(match, locale) || t('categoryDescription', { category: readable }) : t('categoryDescription', { category: readable })} meta={data?.meta} pageHref={target => link(target > 1 ? `/category/${category}?page=${target}` : `/category/${category}`)} />
+  const breadcrumb = { items: [{ name: t('home'), path: link('/') }, { name: readable, path: link(`/category/${category}`) }], jsonLdId: `breadcrumb-category-${category}` }
+  return <Listing title={readable} eyebrow={t('category')} posts={data?.data} loading={loading} error={error} description={match ? categoryDescription(match, locale) || t('categoryDescription', { category: readable }) : t('categoryDescription', { category: readable })} meta={data?.meta} pageHref={target => link(target > 1 ? `/category/${category}?page=${target}` : `/category/${category}`)} breadcrumb={breadcrumb} />
 }
 
-export function Listing({ title, eyebrow, posts, loading, error, description, noIndex = false, meta, pageHref }: { title: string; eyebrow: string; posts?: Post[]; loading: boolean; error?: string; description?: string; noIndex?: boolean; meta?: { page: number; pages: number }; pageHref?: (page: number) => string }) {
+export function Listing({ title, eyebrow, posts, loading, error, description, noIndex = false, meta, pageHref, breadcrumb }: { title: string; eyebrow: string; posts?: Post[]; loading: boolean; error?: string; description?: string; noIndex?: boolean; meta?: { page: number; pages: number }; pageHref?: (page: number) => string; breadcrumb?: { items: BreadcrumbItem[]; jsonLdId: string } }) {
   const { t } = useLocale()
   if (loading) return <Loading />
   if (error) return <ErrorView message={error} />
-  return <main><Seo title={`${title} — ThePaperLeaf`} description={description || t('storiesDescription', { category: title })} image={resolveMediaUrl(posts?.[0]?.coverMedia?.url)} canonical={absoluteUrl(location.pathname + location.search)} noIndex={noIndex} /><SectionTitle eyebrow={eyebrow} title={title} /><div className="latest-grid">{posts?.length ? posts.map(post => <ArticleCard key={post.id} post={post} />) : <EmptyCopy />}</div>{meta && pageHref && <Pager meta={meta} pageHref={pageHref} />}</main>
+  return <main><Seo title={`${title} — ThePaperLeaf`} description={description || t('storiesDescription', { category: title })} image={resolveMediaUrl(posts?.[0]?.coverMedia?.url)} canonical={absoluteUrl(location.pathname + location.search)} noIndex={noIndex} />{breadcrumb && <><JsonLd id={breadcrumb.jsonLdId} data={breadcrumbJsonLd(breadcrumb.items)} /><Breadcrumb items={breadcrumb.items} /></>}<SectionTitle eyebrow={eyebrow} title={title} /><div className="latest-grid">{posts?.length ? posts.map(post => <ArticleCard key={post.id} post={post} />) : <EmptyCopy />}</div>{meta && pageHref && <Pager meta={meta} pageHref={pageHref} />}</main>
 }
 
 function Pager({ meta, pageHref }: { meta: { page: number; pages: number }; pageHref: (page: number) => string }) {

@@ -5,6 +5,8 @@ import { imageSize } from 'image-size'
 import { ContentLanguage, ContentType, NewsBotItemStatus, NewsBotLogLevel, NewsBotRunStatus, NewsBotTrigger, Prisma, prisma } from '@cms/database'
 import { config } from '../config.js'
 import { renderMarkdown, slugify, wordCount } from '../lib/content.js'
+import { pingIndexNow } from '../lib/indexnow.js'
+import { transliterateSlugBase } from '../lib/slugify-cjk.js'
 import { uploadRoot } from '../lib/uploads.js'
 import { classifyArticleCategory, findSemanticDuplicate, rewriteArticle, usesLocalAi } from './openai.js'
 import { canonicalUrl } from './verification.js'
@@ -45,19 +47,6 @@ async function persistProgress(runId: string, counts: Counts) {
 
 function sourceDate(value?: string) { const date = value ? new Date(value) : null; return date && !Number.isNaN(date.getTime()) ? date : null }
 
-/** Notifies IndexNow-participating engines (Bing feeds ChatGPT Search) about new URLs. Failures are ignored. */
-async function pingIndexNow(paths: string[]) {
-  if (!config.INDEXNOW_KEY) return
-  try {
-    const host = new URL(config.PUBLIC_BASE_URL).host
-    await fetch('https://api.indexnow.org/indexnow', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ host, key: config.INDEXNOW_KEY, keyLocation: new URL(`/${config.INDEXNOW_KEY}.txt`, config.PUBLIC_BASE_URL).toString(), urlList: paths.map(path => new URL(path, config.PUBLIC_BASE_URL).toString()) }),
-      signal: AbortSignal.timeout(10_000)
-    })
-  } catch { /* advisory ping; never fail the article */ }
-}
 export function sourceFingerprint(article: Article) { return createHash('sha256').update(`${article.title.toLowerCase().replace(/\s+/g, ' ').trim()}\n${article.body.toLowerCase().replace(/\s+/g, ' ').trim()}`).digest('hex') }
 
 async function saveVisualAsset(asset: VisualAsset, title: string, kind: 'cover' | 'inline', index?: number) {
@@ -96,8 +85,9 @@ export function insertInlineImages(markdown: string, images: InlineImage[]) {
   return blocks.join('\n\n')
 }
 
-async function uniqueSlug(title: string, suffix: string) {
-  const base = slugify(title) || 'news-story'; const existing = await prisma.content.findFirst({ where: { type: ContentType.POST, slug: base }, select: { id: true } })
+async function uniqueSlug(title: string, englishTitle: string | null, suffix: string) {
+  const base = transliterateSlugBase(title, englishTitle) || slugify(title) || 'news-story'
+  const existing = await prisma.content.findFirst({ where: { type: ContentType.POST, slug: base }, select: { id: true } })
   return existing ? `${base.slice(0, 92)}-${suffix}` : base
 }
 
@@ -182,7 +172,7 @@ async function processArticle(source: Source, runId: string, article: Article, c
     const chineseMarkdown = withCredit(insertInlineImages(chinese.markdown, inlineImages), source, sourceUrl, true)
     const englishMarkdown = english ? withCredit(english.markdown, source, sourceUrl, false) : null
     const visualNeedsReview = usedFallbackCover || !inlineImages.length
-    const content = await prisma.content.create({ data: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: new Date(), title: chinese.title, slug: await uniqueSlug(chinese.title, randomUUID().slice(0, 6)), excerpt: chinese.excerpt, category: category.name, categoryId: category.id || null, authorName: 'Editorial Desk', sourceLabel: source.sourceLabel, sourceUrl, markdown: chineseMarkdown, html: renderMarkdown(chineseMarkdown), wordCount: wordCount(chineseMarkdown), tags: chinese.tags, seoTitle: chinese.seoTitle, seoDescription: chinese.seoDescription, coverMediaId: cover.id, visualNeedsReview, translations: english && englishMarkdown ? { create: { language: ContentLanguage.EN, title: english.title, excerpt: english.excerpt, markdown: englishMarkdown, html: renderMarkdown(englishMarkdown), wordCount: wordCount(englishMarkdown), seoTitle: english.seoTitle, seoDescription: english.seoDescription } } : undefined } })
+    const content = await prisma.content.create({ data: { type: ContentType.POST, status: 'PUBLISHED', publishedAt: new Date(), title: chinese.title, slug: await uniqueSlug(chinese.title, english?.title ?? null, randomUUID().slice(0, 6)), excerpt: chinese.excerpt, category: category.name, categoryId: category.id || null, authorName: 'Editorial Desk', sourceLabel: source.sourceLabel, sourceUrl, markdown: chineseMarkdown, html: renderMarkdown(chineseMarkdown), wordCount: wordCount(chineseMarkdown), tags: chinese.tags, seoTitle: chinese.seoTitle, seoDescription: chinese.seoDescription, coverMediaId: cover.id, visualNeedsReview, translations: english && englishMarkdown ? { create: { language: ContentLanguage.EN, title: english.title, excerpt: english.excerpt, markdown: englishMarkdown, html: renderMarkdown(englishMarkdown), wordCount: wordCount(englishMarkdown), seoTitle: english.seoTitle, seoDescription: english.seoDescription } } : undefined } })
     await prisma.newsBotItem.update({ where: { id: item.id }, data: { status: NewsBotItemStatus.CREATED, contentId: content.id, error: null } })
     void pingIndexNow([`/article/${content.slug}`, '/'])
     await log(runId, visualNeedsReview ? NewsBotLogLevel.WARN : NewsBotLogLevel.INFO, 'draft-created', 'Created and published a Chinese-primary CMS post.', { contentId: content.id, slug: content.slug, hasCover: Boolean(cover), inlineImageCount: inlineImages.length, englishTranslation: Boolean(english), visualNeedsReview }, source.id, item.id)

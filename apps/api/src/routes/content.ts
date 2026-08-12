@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { prisma, ContentLanguage, ContentStatus, ContentType } from '@cms/database'
 import { requireAdmin } from '../auth.js'
 import { normalizeStatus, renderMarkdown, slugify, wordCount } from '../lib/content.js'
+import { pingIndexNow } from '../lib/indexnow.js'
 
 const types = { posts: ContentType.POST, pages: ContentType.PAGE }
 const translationSelect = { id: true, language: true, title: true, excerpt: true, markdown: true, html: true, wordCount: true, seoTitle: true, seoDescription: true, createdAt: true, updatedAt: true }
@@ -58,6 +59,13 @@ function translationData(body: any) {
   return { title: String(body.title ?? '').trim(), excerpt: String(body.excerpt ?? ''), markdown, html: renderMarkdown(markdown), wordCount: wordCount(markdown), seoTitle: body.seoTitle ? String(body.seoTitle) : null, seoDescription: body.seoDescription ? String(body.seoDescription) : null }
 }
 
+function publishPaths(item: any) {
+  const path = item.type === ContentType.PAGE ? `/page/${item.slug}` : `/article/${item.slug}`
+  const paths = [path, '/']
+  if (item.type === ContentType.POST && item.categoryRef?.slug) paths.push(`/category/${item.categoryRef.slug}`)
+  return paths
+}
+
 export async function contentRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
   app.get('/', async req => {
@@ -79,8 +87,8 @@ export async function contentRoutes(app: FastifyInstance) {
     const data = translationData(req.body); if (!data.title) throw new Error('Translation title is required')
     return { data: await prisma.contentTranslation.upsert({ where: { contentId_language: { contentId: (req.params as any).id, language } }, update: data, create: { contentId: (req.params as any).id, language, ...data }, select: translationSelect }) }
   } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_TRANSLATION', message: error instanceof Error ? error.message : 'Invalid translation' } }) } })
-  app.post('/', async (req, reply) => { try { const data = dataFrom(req.body); if (!data.title || !data.slug || !Object.values(ContentType).includes(data.type)) throw new Error('Title, slug, and valid type are required'); return reply.code(201).send({ data: await prisma.content.create({ data, select }) }) } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_CONTENT', message: error instanceof Error ? error.message : 'Invalid content' } }) } })
-  app.put('/:id', async (req, reply) => { try { return { data: await prisma.content.update({ where: { id: (req.params as any).id }, data: dataFrom(req.body), select }) } } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_CONTENT', message: error instanceof Error ? error.message : 'Invalid content' } }) } })
+  app.post('/', async (req, reply) => { try { const data = dataFrom(req.body); if (!data.title || !data.slug || !Object.values(ContentType).includes(data.type)) throw new Error('Title, slug, and valid type are required'); const created = await prisma.content.create({ data, select }); if (created.status === 'PUBLISHED') void pingIndexNow(publishPaths(created)); return reply.code(201).send({ data: created }) } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_CONTENT', message: error instanceof Error ? error.message : 'Invalid content' } }) } })
+  app.put('/:id', async (req, reply) => { try { const updated = await prisma.content.update({ where: { id: (req.params as any).id }, data: dataFrom(req.body), select }); if (updated.status === 'PUBLISHED') void pingIndexNow(publishPaths(updated)); return { data: updated } } catch (error) { return reply.code(400).send({ error: { code: 'INVALID_CONTENT', message: error instanceof Error ? error.message : 'Invalid content' } }) } })
   app.delete('/:id', async (req, reply) => { await prisma.content.delete({ where: { id: (req.params as any).id } }); return reply.code(204).send() })
 }
 

@@ -154,9 +154,15 @@ export function Seo({ title, description, image, canonical, type = 'website', no
 
 export function JsonLd({ id, data }: { id: string; data: unknown }) { React.useEffect(() => setJsonLd(id, data), [id, data]); return null }
 
+export type BreadcrumbItem = { name: string; path: string }
+export function breadcrumbJsonLd(items: BreadcrumbItem[]) { return { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: items.map((item, index) => ({ '@type': 'ListItem', position: index + 1, name: item.name, item: absoluteUrl(item.path) })) } }
+export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
+  return <nav className="breadcrumb" aria-label="Breadcrumb"><ol>{items.map((item, index) => index === items.length - 1 ? <li key={item.path} aria-current="page">{item.name}</li> : <li key={item.path}><Link to={item.path}>{item.name}</Link></li>)}</ol></nav>
+}
+
 export function absoluteUrl(path: string) { return typeof window === 'undefined' ? path : new URL(path, window.location.origin).toString() }
-export function publisherJsonLd() { return { '@type': 'Organization', name: siteName, url: absoluteUrl('/'), logo: { '@type': 'ImageObject', url: absoluteUrl('/favicon.svg') } } }
-export function articleJsonLd(article: Post, url: string, image?: string, locale: 'zh-CN' | 'en' = 'zh-CN') { return { '@context': 'https://schema.org', '@type': 'NewsArticle', headline: article.title, description: article.seoDescription || article.excerpt, image: image ? [image] : undefined, datePublished: article.publishedAt || article.createdAt, dateModified: article.updatedAt, inLanguage: locale, author: { '@type': 'Person', name: article.authorName || (locale === 'zh-CN' ? '编辑部' : 'Editorial Desk') }, publisher: publisherJsonLd(), mainEntityOfPage: { '@type': 'WebPage', '@id': url }, articleSection: displayCategory(article, locale), keywords: article.tags?.join(', ') } }
+export function publisherJsonLd() { return { '@type': 'NewsMediaOrganization', name: siteName, url: absoluteUrl('/'), logo: { '@type': 'ImageObject', url: absoluteUrl('/favicon.svg'), width: 48, height: 48 } } }
+export function articleJsonLd(article: Post, url: string, image?: string, locale: 'zh-CN' | 'en' = 'zh-CN') { return { '@context': 'https://schema.org', '@type': 'NewsArticle', headline: article.title.slice(0, 110), description: article.seoDescription || article.excerpt, image: image ? [image] : undefined, datePublished: article.publishedAt || article.createdAt, dateModified: article.updatedAt, inLanguage: locale, wordCount: article.wordCount || undefined, author: { '@type': 'Person', name: article.authorName || (locale === 'zh-CN' ? '编辑部' : 'Editorial Desk') }, publisher: publisherJsonLd(), mainEntityOfPage: { '@type': 'WebPage', '@id': url }, articleSection: displayCategory(article, locale), keywords: article.tags?.join(', ') } }
 export function displayCategory(post: Post, locale: 'zh-CN' | 'en' = 'zh-CN') { return post.categoryRef ? categoryLabel(post.categoryRef, locale) : post.category || (locale === 'zh-CN' ? '综合' : 'General') }
 export function isAboutPage(slug: string) { return slug === 'about-thepaperleaf' || slug === 'about-this-cms' }
 
