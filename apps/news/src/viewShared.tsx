@@ -6,7 +6,10 @@ import { formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml 
 import { categoryLabel, useLocale } from './locale'
 
 export const siteName = 'ThePaperLeaf'
-const unsplashHosts = new Set(['images.unsplash.com', 'plus.unsplash.com'])
+const resizableHosts: Record<string, 'unsplash' | 'pexels'> = {
+  'images.unsplash.com': 'unsplash', 'plus.unsplash.com': 'unsplash',
+  'images.pexels.com': 'pexels'
+}
 const imageProxyHosts: Record<string, string> = {
   'images.unsplash.com': 'unsplash',
   'plus.unsplash.com': 'unsplash',
@@ -66,22 +69,29 @@ export function ArticleImage({ post, big = false, showCredit = false, priority =
   )
 }
 
-function isUnsplash(url: string) {
-  try { return unsplashHosts.has(new URL(url).hostname) } catch { return false }
+function resizableProvider(url: string) {
+  try { return resizableHosts[new URL(url).hostname] } catch { return undefined }
 }
 
 function imageVariant(url: string, width: number) {
-  if (!isUnsplash(url)) return proxyExternalImageUrl(url)
+  const provider = resizableProvider(url)
+  if (!provider) return proxyExternalImageUrl(url)
   const next = new URL(url)
-  next.searchParams.set('auto', 'format')
-  next.searchParams.set('fit', 'crop')
-  next.searchParams.set('w', String(width))
-  next.searchParams.set('q', width <= 480 ? '72' : '78')
+  if (provider === 'unsplash') {
+    next.searchParams.set('auto', 'format')
+    next.searchParams.set('fit', 'crop')
+    next.searchParams.set('w', String(width))
+    next.searchParams.set('q', width <= 480 ? '72' : '78')
+  } else {
+    next.searchParams.set('auto', 'compress')
+    next.searchParams.set('cs', 'tinysrgb')
+    next.searchParams.set('w', String(width))
+  }
   return proxyExternalImageUrl(next.toString())
 }
 
 function imageSrcSet(url: string) {
-  if (!isUnsplash(url)) return undefined
+  if (!resizableProvider(url)) return undefined
   return [320, 480, 700, 960, 1280].map(width => `${imageVariant(url, width)} ${width}w`).join(', ')
 }
 

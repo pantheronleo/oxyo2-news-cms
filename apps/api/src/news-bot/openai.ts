@@ -4,6 +4,8 @@ export type ArticleLanguage = 'zh-CN' | 'en'
 export type InlineImagePlan = { prompt: string; altText: string; afterParagraph: number }
 export type RewrittenPost = { title: string; excerpt: string; markdown: string; tags: string[]; seoTitle: string; seoDescription: string; imagePrompt: string; imageSearchQuery: string; inlineImages: InlineImagePlan[] }
 export const usesLocalAi = () => config.NODE_ENV !== 'production'
+export const MIN_SUBSTANTIVE_CHARACTERS = 600
+export const MIN_SUBSTANTIVE_PARAGRAPHS = 5
 
 const rewriteJsonSchema = {
   type: 'object', additionalProperties: false,
@@ -149,7 +151,7 @@ export function validateRewrittenPost(value: any): { post?: RewrittenPost; missi
   if (!Array.isArray(value?.tags) || value.tags.some((tag: unknown) => typeof tag !== 'string' || !tag.trim())) missing.push('tags')
   if (typeof value?.markdown === 'string') {
     const body = substantiveMarkdownDetails(value.markdown)
-    if (body.characters < 320 || body.paragraphs < 2) missing.push('substantive markdown body (at least two paragraphs and 320 characters excluding the credit)')
+    if (body.characters < MIN_SUBSTANTIVE_CHARACTERS || body.paragraphs < MIN_SUBSTANTIVE_PARAGRAPHS) missing.push(`substantive markdown body (at least ${MIN_SUBSTANTIVE_PARAGRAPHS} paragraphs and ${MIN_SUBSTANTIVE_CHARACTERS} characters excluding the credit)`)
   }
   if (missing.length) return { missing }
   const inlineImages = Array.isArray(value.inlineImages)
@@ -184,12 +186,12 @@ async function repairSubstantiveMarkdown(input: { sourceName: string; sourceUrl:
   const languageInstruction = input.language === 'zh-CN' ? 'Simplified Chinese (简体中文)' : 'natural English'
   return retry(`substantive-markdown-repair-${input.language}`, async attempt => {
     const retryInstruction = attempt > 1 ? 'Your prior body was too short. Expand the factual body with the available source details; do not add facts.' : ''
-    const prompt = `Write only the substantive Markdown body for an original, factual news rewrite in ${languageInstruction}, based only on the supplied source material. Do not output a title, excerpt, tags, SEO fields, images, commentary, or JSON fields other than markdown. Write at least five substantive paragraphs and at least 320 meaningful characters before the source credit. Do not add facts or copy the source wording or structure. ${retryInstruction} End with this exact final credit line: ${credit}\n\nReturn exactly one JSON object: {"markdown":"..."}.\n\nSource title: ${input.title}\nSource text:\n${input.body.slice(0, 16_000)}`
+    const prompt = `Write only the substantive Markdown body for an original, factual news rewrite in ${languageInstruction}, based only on the supplied source material. Do not output a title, excerpt, tags, SEO fields, images, commentary, or JSON fields other than markdown. Write at least ${MIN_SUBSTANTIVE_PARAGRAPHS} substantive paragraphs and at least ${MIN_SUBSTANTIVE_CHARACTERS} meaningful characters before the source credit. Do not add facts or copy the source wording or structure. ${retryInstruction} End with this exact final credit line: ${credit}\n\nReturn exactly one JSON object: {"markdown":"..."}.\n\nSource title: ${input.title}\nSource text:\n${input.body.slice(0, 16_000)}`
     const value = parseAiJson(await requestJson(prompt, articleBodyJsonSchema, `body-repair-${input.language}-${attempt}`))
     if (typeof value?.markdown !== 'string' || !value.markdown.trim()) throw new Error('body repair did not contain markdown')
     const markdown = withFinalSourceCredit(value.markdown, credit)
     const details = substantiveMarkdownDetails(markdown)
-    if (details.characters < 320 || details.paragraphs < 2) throw new Error(`body repair remained too short (${details.paragraphs} paragraphs, ${details.characters} characters)`)
+    if (details.characters < MIN_SUBSTANTIVE_CHARACTERS || details.paragraphs < MIN_SUBSTANTIVE_PARAGRAPHS) throw new Error(`body repair remained too short (${details.paragraphs} paragraphs, ${details.characters} characters)`)
     return markdown
   }, 2)
 }

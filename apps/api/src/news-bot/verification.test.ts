@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { NewsBotItemStatus } from '@cms/database'
 import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
 import { insertInlineImages, isTerminalNewsBotItem, isWithinWorkingHours, shouldStartRun, sourceFingerprint } from './worker.js'
-import { chinesePrimaryMissing, duplicateIndexFromAi, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
+import { MIN_SUBSTANTIVE_CHARACTERS, MIN_SUBSTANTIVE_PARAGRAPHS, chinesePrimaryMissing, duplicateIndexFromAi, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
 import { extractSaysArticleBody } from './adapters.js'
 
-const substantialMarkdown = `${'A'.repeat(180)}\n\n${'B'.repeat(180)}`
+const substantialMarkdown = Array.from({ length: 5 }, (_, i) => String.fromCharCode(65 + i).repeat(130)).join('\n\n')
 
 describe('news bot verification helpers', () => {
   it('uses the approved ten publishers without database fixtures', () => expect(verificationSources).toHaveLength(10))
@@ -38,7 +38,7 @@ describe('news bot verification helpers', () => {
   })
   it('rejects incomplete rewrite payloads before a CMS draft can be created', () => expect(validateRewrittenPost({ title: 'Story', markdown: 'Body' }).missing).toEqual(expect.arrayContaining(['excerpt', 'tags', 'seoTitle', 'seoDescription', 'imagePrompt'])))
   it('does not require an AI category in the rewrite payload', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: substantialMarkdown, tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toEqual([]))
-  it('rejects a markdown payload that contains only the mandatory source credit', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: '原文来源：[Says](https://says.com/story)。', tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toContain('substantive markdown body (at least two paragraphs and 320 characters excluding the credit)'))
+  it('rejects a markdown payload that contains only the mandatory source credit', () => expect(validateRewrittenPost({ title: 'Story', excerpt: 'Excerpt', markdown: '原文来源：[Says](https://says.com/story)。', tags: ['news'], seoTitle: 'Story', seoDescription: 'Excerpt', imagePrompt: 'Image', imageSearchQuery: 'city news' }).missing).toContain(`substantive markdown body (at least ${MIN_SUBSTANTIVE_PARAGRAPHS} paragraphs and ${MIN_SUBSTANTIVE_CHARACTERS} characters excluding the credit)`))
   it('does not count the final source credit as substantive article text', () => expect(substantiveMarkdownDetails(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`)).toEqual(substantiveMarkdownDetails(substantialMarkdown)))
   it('derives complete metadata from an already valid rewrite when a provider omits metadata fields', () => {
     const metadata = fallbackMetadataFromMarkdown(`${substantialMarkdown}\n\nOriginally reported by [Says](https://says.com/story).`, 'Source headline')

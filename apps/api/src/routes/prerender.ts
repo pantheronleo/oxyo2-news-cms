@@ -44,7 +44,7 @@ function template() {
   return cachedTemplate
 }
 
-type HeadInput = { title: string; description: string; canonical: string; image?: string; type?: 'website' | 'article'; locale: Locale; noIndex?: boolean; alternatePath?: string; hasEnglish?: boolean; jsonLd?: Array<{ id: string; data: unknown }>; article?: { publishedAt: Date | string; modifiedAt: Date | string; section?: string }; pagination?: { basePath: string; page: number; pages: number } }
+type HeadInput = { title: string; description: string; canonical: string; image?: string; preloadImage?: string; type?: 'website' | 'article'; locale: Locale; noIndex?: boolean; alternatePath?: string; hasEnglish?: boolean; jsonLd?: Array<{ id: string; data: unknown }>; article?: { publishedAt: Date | string; modifiedAt: Date | string; section?: string }; pagination?: { basePath: string; page: number; pages: number } }
 function headBlock(input: HeadInput) {
   const description = escapeHtml(input.description.slice(0, 220))
   const image = input.image ? absolute(input.image) : ''
@@ -63,6 +63,7 @@ function headBlock(input: HeadInput) {
     `<meta name="twitter:title" content="${escapeHtml(input.title)}" />`,
     `<meta name="twitter:description" content="${description}" />`
   ]
+  if (input.preloadImage) lines.unshift(`<link rel="preload" as="image" href="${escapeHtml(absolute(input.preloadImage))}" fetchpriority="high" />`)
   if (image) lines.push(`<meta property="og:image" content="${escapeHtml(image)}" />`, `<meta name="twitter:image" content="${escapeHtml(image)}" />`)
   if (input.article) {
     lines.push(`<meta property="article:published_time" content="${new Date(input.article.publishedAt).toISOString()}" />`, `<meta property="article:modified_time" content="${new Date(input.article.modifiedAt).toISOString()}" />`)
@@ -120,8 +121,16 @@ function sendPage(reply: FastifyReply, locale: Locale, head: string, body: strin
   return reply.code(status).type('text/html; charset=utf-8').header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300').send(html)
 }
 
-async function activeCategories() {
+const CATEGORIES_TTL_MS = 60_000
+let categoriesCache: { promise: ReturnType<typeof fetchActiveCategories>; expiresAt: number } | null = null
+function fetchActiveCategories() {
   return prisma.category.findMany({ where: { isActive: true }, select: categorySelect, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] })
+}
+async function activeCategories() {
+  const now = Date.now()
+  if (!categoriesCache || categoriesCache.expiresAt < now) categoriesCache = { promise: fetchActiveCategories(), expiresAt: now + CATEGORIES_TTL_MS }
+  try { return await categoriesCache.promise }
+  catch (error) { categoriesCache = null; throw error }
 }
 const localeFrom = (query: Record<string, string>): Locale => query.lang === 'en' ? 'en' : 'zh-CN'
 
@@ -166,8 +175,10 @@ export async function prerenderRoutes(app: FastifyInstance) {
     const rest = posts.slice(1)
     const canonical = absolute(withLang('/', locale))
     const description = hero?.excerpt || (locale === 'zh-CN' ? '为好奇读者而设的独立杂志式新闻、分析与深度解读。' : 'Independent magazine-style news, analysis, and editorial explainers for curious readers.')
-    const head = headBlock({ title: `${siteName} — ${locale === 'zh-CN' ? '新闻杂志' : 'Magazine News'}`, description, canonical, image: hero ? mediaUrl(hero.coverMedia?.url) : undefined, locale, alternatePath: '/', jsonLd: [{ id: 'thepaperleaf-website', data: { '@context': 'https://schema.org', '@type': 'WebSite', name: siteName, url: absolute('/'), description, inLanguage: locale, publisher: publisherJsonLd(), potentialAction: { '@type': 'SearchAction', target: `${absolute('/search')}?q={search_term_string}`, 'query-input': 'required name=search_term_string' } } }] })
-    const heroHtml = hero ? `<section class="hero-shell"><div class="hero-copy"><span class="kicker">${locale === 'zh-CN' ? '今日精选' : 'Today’s pick'}</span><h1><a href="${escapeHtml(withLang(`/article/${hero.slug}`, locale))}">${escapeHtml(hero.title)}</a></h1><p>${escapeHtml(hero.excerpt || '')}</p>${postMeta(hero, locale)}</div></section>` : `<section class="hero-shell"><h1>${siteName}</h1></section>`
+    const image = hero ? mediaUrl(hero.coverMedia?.url) : undefined
+    const head = headBlock({ title: `${siteName} — ${locale === 'zh-CN' ? '新闻杂志' : 'Magazine News'}`, description, canonical, image, preloadImage: image, locale, alternatePath: '/', jsonLd: [{ id: 'thepaperleaf-website', data: { '@context': 'https://schema.org', '@type': 'WebSite', name: siteName, url: absolute('/'), description, inLanguage: locale, publisher: publisherJsonLd(), potentialAction: { '@type': 'SearchAction', target: `${absolute('/search')}?q={search_term_string}`, 'query-input': 'required name=search_term_string' } } }] })
+    const heroImageHtml = image ? `<div class="hero-image-stack"><div class="article-image big" style="--image-ratio:${hero.coverMedia?.width || 1280} / ${hero.coverMedia?.height || 820}"><img src="${escapeHtml(image)}" alt="${escapeHtml(hero.coverMedia?.altText || hero.title)}" width="${hero.coverMedia?.width || 1280}" height="${hero.coverMedia?.height || 820}" fetchpriority="high" /></div></div>` : ''
+    const heroHtml = hero ? `<section class="hero-shell"><div class="hero-copy"><span class="kicker">${locale === 'zh-CN' ? '今日精选' : 'Today’s pick'}</span><h1><a href="${escapeHtml(withLang(`/article/${hero.slug}`, locale))}">${escapeHtml(hero.title)}</a></h1><p>${escapeHtml(hero.excerpt || '')}</p>${postMeta(hero, locale)}</div>${heroImageHtml}</section>` : `<section class="hero-shell"><h1>${siteName}</h1></section>`
     const body = `${siteHeader(categories, locale)}<main>${heroHtml}<section><h2>${locale === 'zh-CN' ? '最新发布' : 'Latest news'}</h2><div class="latest-grid">${rest.map(post => postListItem(post, locale)).join('')}</div></section></main>${siteFooter(locale)}`
     return sendPage(reply, locale, head, body)
   })
@@ -177,8 +188,8 @@ export async function prerenderRoutes(app: FastifyInstance) {
     const slug = String((req.params as any).slug || '')
     const [categories, item] = await Promise.all([activeCategories(), prisma.content.findUnique({ where: { type_slug: { type: ContentType.POST, slug } }, select: articleSelect as any })])
     if (!item || (item as any).status !== 'PUBLISHED' || !(item as any).publishedAt || (item as any).publishedAt > new Date()) return notFound(reply, categories, locale)
+    const relatedPromise = relatedPosts(item, locale)
     const post = localizeContent(item, locale === 'en' ? 'en' : undefined)
-    const related = await relatedPosts(post, locale)
     const path = `/article/${post.slug}`
     const canonical = absolute(withLang(path, locale))
     const image = mediaUrl(post.coverMedia?.url)
@@ -187,9 +198,10 @@ export async function prerenderRoutes(app: FastifyInstance) {
       ...(post.categoryRef?.slug ? [{ name: categoryLabel(post.categoryRef, locale), path: withLang(`/category/${post.categoryRef.slug}`, locale) }] : []),
       { name: post.title, path }
     ]
-    const head = headBlock({ title: `${post.seoTitle || post.title} — ${siteName}`, description: post.seoDescription || post.excerpt || '', canonical, image: image || undefined, type: 'article', locale, alternatePath: path, hasEnglish: post.availableLanguages?.includes('en'), jsonLd: [{ id: `article-${post.slug}`, data: articleJsonLd(post, canonical, locale) }, { id: `breadcrumb-article-${post.slug}`, data: breadcrumbJsonLd(breadcrumbItems) }], article: { publishedAt: post.publishedAt || post.createdAt, modifiedAt: post.updatedAt, section: post.categoryRef ? categoryLabel(post.categoryRef, locale) : post.category } })
+    const head = headBlock({ title: `${post.seoTitle || post.title} — ${siteName}`, description: post.seoDescription || post.excerpt || '', canonical, image: image || undefined, preloadImage: image || undefined, type: 'article', locale, alternatePath: path, hasEnglish: post.availableLanguages?.includes('en'), jsonLd: [{ id: `article-${post.slug}`, data: articleJsonLd(post, canonical, locale) }, { id: `breadcrumb-article-${post.slug}`, data: breadcrumbJsonLd(breadcrumbItems) }], article: { publishedAt: post.publishedAt || post.createdAt, modifiedAt: post.updatedAt, section: post.categoryRef ? categoryLabel(post.categoryRef, locale) : post.category } })
     const cover = image ? `<figure class="article-image big"><img src="${escapeHtml(image)}" alt="${escapeHtml(post.coverMedia?.altText || post.title)}" width="${post.coverMedia?.width || 1280}" height="${post.coverMedia?.height || 820}" fetchpriority="high" /></figure>` : ''
     const notice = locale === 'en' && post.language !== 'en' ? `<p class="translation-notice">This article is currently available in its original Chinese version.</p>` : ''
+    const related = await relatedPromise
     const relatedHtml = related.length ? `<aside class="related"><h3>${locale === 'zh-CN' ? '相关文章' : 'Related stories'}</h3>${related.map(item => postListItem(item, locale)).join('')}</aside>` : ''
     const body = `${siteHeader(categories, locale)}<main class="article-page"><article>${breadcrumbHtml(breadcrumbItems)}<div class="article-nav"><a class="backlink" href="${withLang('/', locale)}">${locale === 'zh-CN' ? '← 返回首页' : '← Back to front page'}</a><span class="kicker">${escapeHtml(post.categoryRef ? categoryLabel(post.categoryRef, locale) : post.category || 'General')}</span></div>${notice}<h1>${escapeHtml(post.title)}</h1><p class="dek">${escapeHtml(post.excerpt || '')}</p>${postMeta(post, locale)}${cover}<div class="article-body">${rewriteExternalImageSources(post.html || '')}</div></article>${relatedHtml}</main>${siteFooter(locale)}`
     return sendPage(reply, locale, head, body)
@@ -239,8 +251,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
     const locale = localeFrom(req.query as Record<string, string>)
     const query = String((req.query as any).q || '').trim().slice(0, 120)
     const page = pageFrom(req.query as Record<string, string>)
-    const categories = await activeCategories()
-    const { posts, pages } = query ? await pagedPosts({ search: query }, locale, page, 18) : { posts: [], pages: 1 }
+    const [categories, { posts, pages }] = await Promise.all([activeCategories(), query ? pagedPosts({ search: query }, locale, page, 18) : Promise.resolve({ posts: [], pages: 1 })])
     const searchBase = query ? `/search?q=${encodeURIComponent(query)}` : '/search'
     const title = query ? (locale === 'zh-CN' ? `搜索：${query} — ${siteName}` : `Search: ${query} — ${siteName}`) : (locale === 'zh-CN' ? `搜索 — ${siteName}` : `Search — ${siteName}`)
     const head = headBlock({ title, description: locale === 'zh-CN' ? `ThePaperLeaf 上“${query}”的搜索结果。` : `Search results for ${query} on ${siteName}.`, canonical: absolute(withLang('/search', locale)), locale, noIndex: !query })
