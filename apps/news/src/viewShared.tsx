@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, Clock, Send, Sparkles } from 'lucide-react'
-import type { Post } from './newsApi'
+import type { Media, Post } from './newsApi'
 import { formatDate, readingTime, resolveMediaUrl, setJsonLd, setSeo, stripHtml } from './utils'
 import { categoryLabel, useLocale } from './locale'
 
@@ -17,9 +17,14 @@ const imageProxyHosts: Record<string, string> = {
   'cdn.pixabay.com': 'pixabay'
 }
 
-export function useAsync<T>(load: () => Promise<T>, deps: React.DependencyList) {
-  const [state, setState] = React.useState<{ data?: T; error?: string; loading: boolean }>({ loading: true })
+export function useAsync<T>(load: () => Promise<T>, deps: React.DependencyList, initialData?: T) {
+  const initial = React.useRef(initialData)
+  const [state, setState] = React.useState<{ data?: T; error?: string; loading: boolean }>({ data: initialData, loading: initialData === undefined })
   React.useEffect(() => {
+    if (initial.current !== undefined) {
+      initial.current = undefined
+      return
+    }
     let alive = true
     setState({ loading: true })
     load()
@@ -106,8 +111,20 @@ export function proxyExternalImageUrl(url: string) {
   }
 }
 
-export function rewriteExternalImageSources(html: string) {
-  return html.replace(/(src\s*=\s*["'])(https?:\/\/(?:images|plus)\.unsplash\.com|https?:\/\/images\.pexels\.com|https?:\/\/cdn\.pixabay\.com)([^"']*)/gi, (_match, prefix, origin, path) => `${prefix}${proxyExternalImageUrl(`${origin}${path}`)}`)
+export function rewriteExternalImageSources(html: string, media: Media[] = []) {
+  const mediaByUrl = new Map(media.map(item => [item.url, item]))
+  return html.replace(/<img\b([^>]*?)\/?>(?:<\/img>)?/gi, (tag, attrs) => {
+    const source = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(attrs)?.[1] || ''
+    const item = mediaByUrl.get(source)
+    const rewritten = attrs.replace(/(src\s*=\s*["'])(https?:\/\/(?:images|plus)\.unsplash\.com|https?:\/\/images\.pexels\.com|https?:\/\/cdn\.pixabay\.com)([^"']*)/gi, (_match: string, prefix: string, origin: string, path: string) => `${prefix}${proxyExternalImageUrl(`${origin}${path}`)}`)
+    const width = item?.width || 1200
+    const height = item?.height || 675
+    const withWidth = /\bwidth\s*=/i.test(rewritten) ? rewritten : `${rewritten} width="${width}"`
+    const withHeight = /\bheight\s*=/i.test(withWidth) ? withWidth : `${withWidth} height="${height}"`
+    const withLoading = /\bloading\s*=/i.test(withHeight) ? withHeight : `${withHeight} loading="lazy"`
+    const withDecoding = /\bdecoding\s*=/i.test(withLoading) ? withLoading : `${withLoading} decoding="async"`
+    return `<img${withDecoding}>`
+  })
 }
 
 function stockCreditLabel(media?: Post['coverMedia']) {

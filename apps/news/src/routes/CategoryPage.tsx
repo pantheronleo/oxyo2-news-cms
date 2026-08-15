@@ -4,6 +4,7 @@ import { fetchPosts, type Category, type Post } from '../newsApi'
 import { resolveMediaUrl } from '../utils'
 import { ArticleCard, Breadcrumb, type BreadcrumbItem, EmptyCopy, ErrorView, JsonLd, Loading, SectionTitle, Seo, absoluteUrl, breadcrumbJsonLd, useAsync } from '../viewShared'
 import { categoryDescription, categoryLabel, useLocale } from '../locale'
+import { bootstrapForCurrentLocale } from '../bootstrap'
 
 export default function CategoryPage({ categories }: { categories: Category[] }) {
   const { locale, link, t } = useLocale()
@@ -13,7 +14,8 @@ export default function CategoryPage({ categories }: { categories: Category[] })
   const match = categories.find(item => item.slug === category)
   const readable = match ? categoryLabel(match, locale) : category.replaceAll('-', ' ')
   const query = match?.slug ?? category
-  const { data, loading, error } = useAsync(() => fetchPosts({ category: query, limit: 18, page, lang: locale }), [query, locale, page])
+  const bootstrap = bootstrapForCurrentLocale()
+  const { data, loading, error } = useAsync(() => fetchPosts({ category: query, limit: 18, page, lang: locale }), [query, locale, page], bootstrap?.listing)
   const breadcrumb = { items: [{ name: t('home'), path: link('/') }, { name: readable, path: link(`/category/${category}`) }], jsonLdId: `breadcrumb-category-${category}` }
   return <Listing title={readable} eyebrow={t('category')} posts={data?.data} loading={loading} error={error} description={match ? categoryDescription(match, locale) || t('categoryDescription', { category: readable }) : t('categoryDescription', { category: readable })} meta={data?.meta} pageHref={target => link(target > 1 ? `/category/${category}?page=${target}` : `/category/${category}`)} breadcrumb={breadcrumb} />
 }

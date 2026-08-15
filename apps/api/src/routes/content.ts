@@ -50,8 +50,12 @@ async function withImageCredits(items: any[], language?: string) {
   const urls = [...new Set(localized.flatMap(item => [item.coverMedia?.url, ...imageUrlsFromMarkdown(item.markdown)]).filter(Boolean))]
   if (!urls.length) return localized.map(item => ({ ...item, imageCredits: [] }))
   const media = await prisma.media.findMany({ where: { url: { in: urls } }, select: mediaSelect })
-  const byUrl = new Map(media.filter(isStockMedia).map(item => [item.url, item]))
-  return localized.map(item => ({ ...item, imageCredits: [...new Set([item.coverMedia?.url, ...imageUrlsFromMarkdown(item.markdown)])].map(url => byUrl.get(url) || legacyStockCredit(url)).filter(Boolean) }))
+  const byUrl = new Map(media.map(item => [item.url, item]))
+  const stockByUrl = new Map(media.filter(isStockMedia).map(item => [item.url, item]))
+  return localized.map(item => {
+    const imageUrls = [...new Set([item.coverMedia?.url, ...imageUrlsFromMarkdown(item.markdown)].filter(Boolean))]
+    return { ...item, imageCredits: imageUrls.map(url => stockByUrl.get(url) || legacyStockCredit(url)).filter(Boolean), inlineMedia: imageUrls.map(url => byUrl.get(url)).filter(Boolean) }
+  })
 }
 
 function translationData(body: any) {

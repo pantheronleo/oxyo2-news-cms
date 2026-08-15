@@ -6,13 +6,19 @@ import { fetchCategories, fetchPosts, type Category, type Post } from './newsApi
 import { categorySlug, resolveMediaUrl } from './utils'
 import { ArticleMeta, ErrorView, HeroImageStack, JsonLd, MiniCard, Seo, absoluteUrl, siteName, useAsync } from './viewShared'
 import { LocaleProvider, categoryLabel, useLocale } from './locale'
+import { bootstrapForCurrentLocale } from './bootstrap'
 import './styles.css'
 
-const ArticlePage = React.lazy(() => import('./routes/ArticlePage'))
-const CategoryPage = React.lazy(() => import('./routes/CategoryPage'))
-const SearchPage = React.lazy(() => import('./routes/SearchPage'))
-const StaticPage = React.lazy(() => import('./routes/StaticPage'))
-const HomeSections = React.lazy(() => import('./HomeSections'))
+const loadArticlePage = () => import('./routes/ArticlePage')
+const loadCategoryPage = () => import('./routes/CategoryPage')
+const loadSearchPage = () => import('./routes/SearchPage')
+const loadStaticPage = () => import('./routes/StaticPage')
+const ArticlePage = React.lazy(loadArticlePage)
+const CategoryPage = React.lazy(loadCategoryPage)
+const SearchPage = React.lazy(loadSearchPage)
+const StaticPage = React.lazy(loadStaticPage)
+const loadHomeSections = () => import('./HomeSections')
+const HomeSections = React.lazy(loadHomeSections)
 
 const fallbackCategoryPairs: Array<[string, string]> = [
   ['Business', '商业'], ['Technology', '科技'], ['Culture', '文化'], ['World', '国际'], ['Science', '科学'], ['Sport', '体育']
@@ -21,17 +27,19 @@ const fallbackCategories: Category[] = fallbackCategoryPairs.map(([name, nameZh]
 
 function Layout() {
   const { locale, link, setLocale, t } = useLocale()
-  const { data } = useAsync(fetchCategories, [])
+  const bootstrap = bootstrapForCurrentLocale()
+  const { data } = useAsync(fetchCategories, [], bootstrap?.categories ? { data: bootstrap.categories } : undefined)
   const categories = data?.data?.length ? data.data : fallbackCategories
   return <><header className="site-header"><Link to={link('/')} className="logo" aria-label={`${siteName} ${t('home')}`}>{siteName}<span>.</span></Link><nav aria-label="Primary navigation">{categories.map(category => <Link key={category.id} to={link(`/category/${category.slug}`)}>{categoryLabel(category, locale)}</Link>)}<Link to={link('/page/about-thepaperleaf')}>{t('about')}</Link></nav><div className="header-actions"><form className="top-search" action={link('/search')} role="search"><Search /><input name="q" aria-label={t('searchNews')} placeholder={t('search')} /><button>{t('go')}</button></form><div className="language-switch global-language-switch" aria-label={t('language')}><button className={locale === 'zh-CN' ? 'active' : ''} onClick={() => setLocale('zh-CN')}>中文</button><button className={locale === 'en' ? 'active' : ''} onClick={() => setLocale('en')}>EN</button></div></div></header><Suspense fallback={<RouteSkeleton />}><Routes><Route path="/" element={<Home categories={categories} />} /><Route path="/article/:slug" element={<ArticlePage />} /><Route path="/category/:category" element={<CategoryPage categories={categories} />} /><Route path="/search" element={<SearchPage />} /><Route path="/page/:slug" element={<StaticPage />} /><Route path="*" element={<NotFound />} /></Routes></Suspense><Footer /></>
 }
 
 function Home({ categories }: { categories: Category[] }) {
   const { locale, link, t } = useLocale()
+  const bootstrap = bootstrapForCurrentLocale()
   const { data, loading, error } = useAsync(async () => {
     const [featured, latest] = await Promise.all([fetchPosts({ featured: true, limit: 6, lang: locale }), fetchPosts({ limit: 12, lang: locale })])
     return { featured: featured.data, latest: latest.data }
-  }, [locale])
+  }, [locale], bootstrap?.home)
   const [previewIndex, setPreviewIndex] = React.useState(0)
   const [carouselPaused, setCarouselPaused] = React.useState(false)
   const posts = data?.latest ?? []
@@ -65,4 +73,16 @@ function RouteSkeleton() { const { t } = useLocale(); return <main className="st
 function NotFound() { const { t } = useLocale(); return <main className="state error"><Seo title={t('notFoundTitle')} description={t('notFoundDescription')} noIndex />{t('notFound')}</main> }
 function Footer() { const { locale } = useLocale(); return <footer><b>{siteName}<span>.</span></b><p>{locale === 'zh-CN' ? '为好奇读者而设的独立杂志式新闻。' : 'Independent magazine-style news for curious readers.'}</p></footer> }
 
-createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><LocaleProvider><Layout /></LocaleProvider></BrowserRouter></React.StrictMode>)
+function initialRouteModule() {
+  const path = window.location.pathname
+  if (path.startsWith('/article/')) return loadArticlePage()
+  if (path.startsWith('/category/')) return loadCategoryPage()
+  if (path === '/search') return loadSearchPage()
+  if (path.startsWith('/page/')) return loadStaticPage()
+  return loadHomeSections()
+}
+
+// Keep the complete SSR document visible while the one route module needed for
+// the current URL loads. The bootstrap payload then lets that first React render
+// use the same data instead of replacing it with a loading state.
+void initialRouteModule().finally(() => createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><LocaleProvider><Layout /></LocaleProvider></BrowserRouter></React.StrictMode>))

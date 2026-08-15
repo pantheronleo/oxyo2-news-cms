@@ -444,8 +444,8 @@ h3{font-size:1.5rem;line-height:1.02;letter-spacing:-.045em;font-weight:900;text
 .breadcrumb li[aria-current]{color:var(--ink);font-weight:600}
 .article-nav{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .language-switch{display:inline-flex;margin-left:auto;padding:3px;border:1px solid var(--line);border-radius:999px;background:#f7f6fb}
-.language-switch button{border:0;background:transparent;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:900;color:var(--muted);cursor:pointer}
-.language-switch button.active{background:#050505;color:white}
+.language-switch button,.language-switch a{border:0;background:transparent;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:900;color:var(--muted);cursor:pointer}
+.language-switch button.active,.language-switch a.active{background:#050505;color:white}
 .backlink{display:inline-flex;align-items:center;border:1px solid var(--line);background:white;border-radius:999px;padding:9px 13px;font-weight:900;color:var(--purple);box-shadow:0 8px 18px #07060408}
 .article-page .article-image.big{height:460px;min-height:460px;margin:28px 0;border-radius:26px}
 .article-page .article-image.big img,.article-page .article-image.big .placeholder{height:460px;min-height:460px}
@@ -453,7 +453,7 @@ h3{font-size:1.5rem;line-height:1.02;letter-spacing:-.045em;font-weight:900;text
 .related h3{text-transform:none;font-family:var(--font-display);font-size:1.9rem}
 .article-body{font-size:1.08rem;line-height:1.85;color:#292623}
 .article-body h2,.article-body h3{margin-top:1.4em}
-.article-body img{display:block;width:100%;max-width:760px;max-height:520px;object-fit:cover;margin:2rem auto;border-radius:20px;box-shadow:0 14px 34px rgba(24,30,27,.12)}
+.article-body img{display:block;width:100%;height:auto;max-width:760px;margin:2rem auto;border-radius:20px;box-shadow:0 14px 34px rgba(24,30,27,.12)}
 .static-page{margin-top:44px;margin-bottom:52px;max-width:920px;background:white;border:1px solid var(--line);border-radius:28px;padding:32px}
 .static-hero{
   margin:-32px -32px 28px;
