@@ -10,7 +10,7 @@ if (process.env.NODE_ENV !== 'production') {
   }
 }
 
-export const config = z.object({
+const parsedConfig = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(4000), HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().min(1), SESSION_SECRET: z.string().min(32),
@@ -23,4 +23,14 @@ export const config = z.object({
   PEXELS_API_KEY: z.string().optional(), PIXABAY_API_KEY: z.string().optional(), UNSPLASH_ACCESS_KEY: z.string().optional(),
   NEWS_BOT_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(15).default(60), NEWS_BOT_TIMEZONE: z.string().default('Asia/Kuala_Lumpur'),
   INDEXNOW_KEY: z.string().optional(),
+  GSC_OAUTH_CLIENT_ID: z.string().optional(), GSC_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GSC_TOKEN_ENCRYPTION_KEY: z.string().optional(), GSC_TOKEN_STORE_PATH: z.string().default('./gsc-connection.enc'),
+  GSC_OAUTH_REDIRECT_URI: z.preprocess(value => value === '' ? undefined : value, z.string().url().optional()),
+  GSC_AUTOMATION_EXPORT_TOKEN: z.preprocess(value => value === '' ? undefined : value, z.string().min(32).optional()),
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(), TELEGRAM_CHAT_ID: z.string().min(1).optional(),
 }).parse(process.env)
+
+export const config = {
+  ...parsedConfig,
+  GSC_OAUTH_REDIRECT_URI: parsedConfig.GSC_OAUTH_REDIRECT_URI ?? `${parsedConfig.ADMIN_ORIGIN.replace(/\/$/, '')}/api/admin/search-console/oauth/callback`,
+}

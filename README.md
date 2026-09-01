@@ -42,6 +42,20 @@ pnpm --filter @cms/database seed:news
 
 The demo news seed uses remote Unsplash image URLs for thumbnails and in-article media so the public site looks like a real magazine without requiring local image downloads. It also upserts the comprehensive `/page/about-this-cms` About page with SEO title/description fields. Unsplash images are free to use under the Unsplash license; attribution is appreciated but not required.
 
+## Google Search Console insights
+
+The private CMS admin includes **Search Insights** at `/search-insights`. It reads live Search Console performance, sitemap, and priority URL-inspection data, displays it in the admin, and exports the active date range as an AI-ready JSON file. It does not save analytics data to PostgreSQL.
+
+Create a **Web application** OAuth client in Google Cloud, enable the Google Search Console API, and register this redirect URI:
+
+```text
+https://YOUR_CMS_ADMIN_DOMAIN/api/admin/search-console/oauth/callback
+```
+
+For local development, register `http://localhost:5173/api/admin/search-console/oauth/callback`. Add the Web client's ID and secret to the API environment along with a unique `GSC_TOKEN_ENCRYPTION_KEY`; set `GSC_TOKEN_STORE_PATH` to a private, server-only file outside the repository. The CMS requests only the `webmasters.readonly` scope. A CMS administrator can then connect an account with Search Console access and select the ThePaperLeaf property. Never add the OAuth JSON, client secret, encrypted connection file, or export data to Git.
+
+The daily Codex automation, rather than the CMS web page, retrieves its fresh AI context from the development-only local endpoint `GET /api/admin/search-console/automation-export`. Set a unique `GSC_AUTOMATION_EXPORT_TOKEN` (at least 32 characters) and send it as `Authorization: Bearer <token>`. The endpoint is unavailable outside development and never exposes the token to the browser. The automation atomically replaces the ignored `analysis/search-insights-current.json`, then invokes the installed `thepaperleaf-gsc-optimizer` skill in its own local Codex environment. The active CMS checkout remains untouched unless the skill’s safe-fix and PR checks independently pass. Never add the token, exported context, or generated artifacts to Git.
+
 ## EC2 deployment
 
 1. Launch Ubuntu on EC2, attach enough EBS storage for PostgreSQL plus uploads, assign a static IP/domain, and restrict ports with a security group (SSH from trusted IPs; HTTP/HTTPS publicly).

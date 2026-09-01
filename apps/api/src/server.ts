@@ -17,6 +17,7 @@ import { categoryRoutes, publicCategoryRoutes } from './routes/categories.js'
 import { feedRoutes } from './routes/feeds.js'
 import { prerenderRoutes } from './routes/prerender.js'
 import { newsBotRoutes } from './routes/news-bot.js'
+import { searchConsoleRoutes } from './routes/search-console.js'
 import { startNewsBotScheduler, stopNewsBotScheduler } from './news-bot/worker.js'
 
 export async function buildApp() {
@@ -29,7 +30,7 @@ export async function buildApp() {
   const csrfExemptAdminPaths = new Set(['/auth/login','/auth/forgot-password','/auth/reset-password','/api/admin/auth/login','/api/admin/auth/forgot-password','/api/admin/auth/reset-password'])
   await app.register(async admin=>{
     admin.addHook('preHandler',(req,reply,done)=>{const path = req.url.split('?')[0] ?? ''; if(['GET','HEAD','OPTIONS'].includes(req.method)||csrfExemptAdminPaths.has(path)) return done(); admin.csrfProtection(req,reply,done)})
-    await admin.register(authRoutes,{prefix:'/auth'}); await admin.register(contentRoutes,{prefix:'/content'}); await admin.register(mediaRoutes,{prefix:'/media'}); await admin.register(categoryRoutes,{prefix:'/categories'}); await admin.register(newsBotRoutes,{prefix:'/news-bot'})
+    await admin.register(authRoutes,{prefix:'/auth'}); await admin.register(contentRoutes,{prefix:'/content'}); await admin.register(mediaRoutes,{prefix:'/media'}); await admin.register(categoryRoutes,{prefix:'/categories'}); await admin.register(newsBotRoutes,{prefix:'/news-bot'}); await admin.register(searchConsoleRoutes,{prefix:'/search-console'})
     admin.get('/dashboard',{preHandler:requireAdmin},async()=>{const [drafts,published,scheduled,media]=await prisma.$transaction([prisma.content.count({where:{status:'DRAFT'}}),prisma.content.count({where:{status:'PUBLISHED'}}),prisma.content.count({where:{status:'SCHEDULED'}}),prisma.media.count()]); return{data:{drafts,published,scheduled,media}}})
   },{prefix:'/api/admin'})
   await app.register(publicRoutes,{prefix:'/api/v1'}); await app.register(publicCategoryRoutes,{prefix:'/api/v1'}); await app.register(feedRoutes); await app.register(prerenderRoutes); await serveMedia(app)

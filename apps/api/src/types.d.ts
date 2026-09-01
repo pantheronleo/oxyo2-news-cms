@@ -1,2 +1,2 @@
 import '@fastify/session'
-declare module '@fastify/session' { interface FastifySessionObject { userId?: string } }
+declare module '@fastify/session' { interface FastifySessionObject { userId?: string; searchConsoleOAuthState?: string; searchConsoleOAuthExpiresAt?: number } }
