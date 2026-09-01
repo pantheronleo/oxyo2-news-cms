@@ -56,6 +56,8 @@ For local development, register `http://localhost:5173/api/admin/search-console/
 
 The daily Codex automation, rather than the CMS web page, retrieves its fresh AI context from the development-only local endpoint `GET /api/admin/search-console/automation-export`. Set a unique `GSC_AUTOMATION_EXPORT_TOKEN` (at least 32 characters) and send it as `Authorization: Bearer <token>`. The endpoint is unavailable outside development and never exposes the token to the browser. The automation atomically replaces the ignored `analysis/search-insights-current.json`, then invokes the installed `thepaperleaf-gsc-optimizer` skill in its own local Codex environment. The active CMS checkout remains untouched unless the skill’s safe-fix and PR checks independently pass. Never add the token, exported context, or generated artifacts to Git.
 
+For the daily optimizer, request the latest seven inclusive UTC calendar days by passing `startDate` (today minus six days) and `endDate` (today) to the export endpoint. Keep HTTPS certificate verification enabled during public-site checks; if a local Python runtime has no default trust store, provide its system CA bundle (for example, `SSL_CERT_FILE=/etc/ssl/cert.pem`) instead of disabling verification.
+
 ## EC2 deployment
 
 1. Launch Ubuntu on EC2, attach enough EBS storage for PostgreSQL plus uploads, assign a static IP/domain, and restrict ports with a security group (SSH from trusted IPs; HTTP/HTTPS publicly).
