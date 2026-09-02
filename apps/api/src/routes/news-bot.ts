@@ -43,7 +43,9 @@ export async function newsBotRoutes(app: FastifyInstance) {
     const run = await prisma.newsBotRun.findUnique({
       where: { id },
       include: {
-        logs: { orderBy: { createdAt: 'asc' }, take: 300, include: { source: { select: { id: true, name: true, sourceLabel: true, feedUrl: true } } }, },
+        // Source/run logs have no per-item relation. Do not cap them: each source
+        // failure must remain visible even when a long run produces many item logs.
+        logs: { where: { itemId: null }, orderBy: { createdAt: 'asc' }, include: { source: { select: { id: true, name: true, sourceLabel: true, feedUrl: true } } }, },
         items: {
           orderBy: { createdAt: 'desc' },
           include: {

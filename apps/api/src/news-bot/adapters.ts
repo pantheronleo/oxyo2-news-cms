@@ -1,18 +1,80 @@
 import { parseFeed, type FeedItem } from './verification.js'
 
 export type ConfiguredSource = { feedUrl: string }
+export type FeedDiscovery = {
+  items: FeedItem[]
+  request: { feedUrl: string; finalUrl: string; status: number; attempts: number }
+}
+export class FeedRequestError extends Error {
+  constructor(message: string, readonly context: Record<string, unknown>) {
+    super(message)
+    this.name = 'FeedRequestError'
+  }
+}
 export interface NewsSourceAdapter {
   id: string
-  discover(source: ConfiguredSource): Promise<FeedItem[]>
+  discover(source: ConfiguredSource): Promise<FeedDiscovery>
+}
+
+const FEED_MAX_ATTEMPTS = 3
+const feedHeaders = {
+  // This remains an identifiable bot rather than impersonating a browser. The
+  // additional contact URL helps publishers diagnose a blocked feed request.
+  'user-agent': 'ThePaperLeafNewsBot/1.0 (+https://thepaperleaf.com/llms.txt)',
+  accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9,*/*;q=0.1',
+  'accept-language': 'en-MY,en;q=0.9,zh-CN;q=0.8'
+}
+
+/** Transient publisher/WAF failures are worth retrying; malformed and missing feeds are not. */
+export function shouldRetryFeedStatus(status: number) {
+  return status === 403 || status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+function retryDelay(response: Response | undefined, attempt: number) {
+  const retryAfter = response?.headers.get('retry-after')
+  const seconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : 0
+  return Math.min(seconds > 0 ? seconds * 1000 : 600 * attempt, 5_000)
+}
+
+async function wait(milliseconds: number) { await new Promise(resolve => setTimeout(resolve, milliseconds)) }
+
+export async function discoverRssAtomFeed(feedUrl: string): Promise<FeedDiscovery> {
+  let lastResponse: Response | undefined
+  let lastError: unknown
+  for (let attempt = 1; attempt <= FEED_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(feedUrl, { headers: feedHeaders, signal: AbortSignal.timeout(20_000), redirect: 'follow' })
+      if (response.ok) return { items: parseFeed(await response.text(), response.url), request: { feedUrl, finalUrl: response.url, status: response.status, attempts: attempt } }
+      lastResponse = response
+      if (!shouldRetryFeedStatus(response.status) || attempt === FEED_MAX_ATTEMPTS) break
+      await wait(retryDelay(response, attempt))
+    } catch (error) {
+      lastError = error
+      if (attempt === FEED_MAX_ATTEMPTS) break
+      await wait(600 * attempt)
+    }
+  }
+  const failureContext = lastResponse
+    ? {
+        feedUrl,
+        finalUrl: lastResponse.url,
+        status: lastResponse.status,
+        statusText: lastResponse.statusText,
+        attempts: FEED_MAX_ATTEMPTS,
+        server: lastResponse.headers.get('server'),
+        cloudflareRay: lastResponse.headers.get('cf-ray'),
+        retryAfter: lastResponse.headers.get('retry-after')
+      }
+    : { feedUrl, attempts: FEED_MAX_ATTEMPTS, networkError: lastError instanceof Error ? lastError.message : 'network error' }
+  const suffix = lastResponse
+    ? `${lastResponse.status} ${lastResponse.statusText} after ${FEED_MAX_ATTEMPTS} attempts${lastResponse.status === 403 ? ' (the publisher or its web-application firewall refused the bot request)' : ''}`
+    : `${lastError instanceof Error ? lastError.message : 'network error'} after ${FEED_MAX_ATTEMPTS} attempts`
+  throw new FeedRequestError(`Feed request failed: ${suffix}`, failureContext)
 }
 
 export const rssAtomAdapter: NewsSourceAdapter = {
   id: 'rss-atom',
-  async discover(source) {
-    const response = await fetch(source.feedUrl, { headers: { 'user-agent': 'PaperleafNewsBot/1.0', accept: 'application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9,*/*;q=0.1' }, signal: AbortSignal.timeout(20_000) })
-    if (!response.ok) throw new Error(`Feed request failed: ${response.status} ${response.statusText}`)
-    return parseFeed(await response.text(), response.url)
-  }
+  discover: source => discoverRssAtomFeed(source.feedUrl)
 }
 
 const decodeHtml = (value: string) => value

@@ -3,7 +3,7 @@ import { NewsBotItemStatus } from '@cms/database'
 import { canonicalUrl, findFeedUrls, parseFeed, robotsAllows, verificationSources } from './verification.js'
 import { insertInlineImages, isTerminalNewsBotItem, isWithinWorkingHours, shouldStartRun, sourceFingerprint } from './worker.js'
 import { MIN_SUBSTANTIVE_CHARACTERS, MIN_SUBSTANTIVE_PARAGRAPHS, chinesePrimaryMissing, duplicateIndexFromAi, fallbackAuxiliaryFromSource, fallbackMetadataFromMarkdown, normalizeEditorialTitle, parseAiJson, substantiveMarkdownDetails, usesLocalAi, validateRewrittenPost } from './openai.js'
-import { extractSaysArticleBody } from './adapters.js'
+import { extractSaysArticleBody, shouldRetryFeedStatus } from './adapters.js'
 
 const substantialMarkdown = Array.from({ length: 5 }, (_, i) => String.fromCharCode(65 + i).repeat(130)).join('\n\n')
 
@@ -81,5 +81,11 @@ describe('news bot verification helpers', () => {
   it('extracts the full SAYS story-content block instead of its feed teaser', () => {
     const html = '<div itemProp="articleBody"><div class="story-middle story-content read-more-overflow-active"><p>Malaysia&#8217;s economy has grown.</p><div><p>Workers are still waiting for higher wages and stronger job security.</p></div></div></div>'
     expect(extractSaysArticleBody(html)).toBe("Malaysia’s economy has grown. Workers are still waiting for higher wages and stronger job security.")
+  })
+  it('retries transient publisher feed failures but not an invalid feed URL response', () => {
+    expect(shouldRetryFeedStatus(403)).toBe(true)
+    expect(shouldRetryFeedStatus(429)).toBe(true)
+    expect(shouldRetryFeedStatus(503)).toBe(true)
+    expect(shouldRetryFeedStatus(404)).toBe(false)
   })
 })

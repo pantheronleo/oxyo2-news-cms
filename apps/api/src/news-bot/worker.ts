@@ -10,7 +10,7 @@ import { transliterateSlugBase } from '../lib/slugify-cjk.js'
 import { uploadRoot } from '../lib/uploads.js'
 import { classifyArticleCategory, findSemanticDuplicate, rewriteArticle, usesLocalAi } from './openai.js'
 import { canonicalUrl } from './verification.js'
-import { enhanceArticleBody, rssAtomAdapter } from './adapters.js'
+import { enhanceArticleBody, FeedRequestError, rssAtomAdapter } from './adapters.js'
 import { fallbackCoverVisual, resolveVisual, type VisualAsset } from './visuals.js'
 
 type Source = { id: string; name: string; feedUrl: string; sourceLabel: string; category: string; categoryId: string | null }
@@ -187,14 +187,24 @@ async function processArticle(source: Source, runId: string, article: Article, c
 
 async function processSource(source: Source, runId: string, articleLimit: number | null, counts: Counts, categories: CmsCategory[]) {
   await log(runId, NewsBotLogLevel.INFO, 'source-started', 'Checking source feed for unseen articles.', { source: source.name, feedUrl: source.feedUrl, articleLimit: articleLimit ?? 'all-unseen' }, source.id)
-  const articles = await rssAtomAdapter.discover(source)
+  const discovery = await rssAtomAdapter.discover(source)
+  const articles = discovery.items
   const known = await prisma.newsBotItem.findMany({ where: { sourceUrl: { in: articles.map(article => canonicalUrl(article.url)) } }, select: { sourceUrl: true, status: true } })
   const knownByUrl = new Map(known.map(item => [item.sourceUrl, item.status])); const retryable = articles.filter(article => knownByUrl.get(canonicalUrl(article.url)) === NewsBotItemStatus.FAILED)
   const newItems = articles.filter(article => !knownByUrl.has(canonicalUrl(article.url)))
   const selected = [...retryable, ...newItems]; const limited = articleLimit === null ? selected : selected.slice(0, articleLimit)
-  await log(runId, NewsBotLogLevel.INFO, 'source-discovered', 'Finished feed discovery.', { discovered: articles.length, unseen: newItems.length, retryable: retryable.length, selected: limited.length }, source.id)
+  const latest = articles[0]
+  const feedContext = {
+    discovered: articles.length,
+    unseen: newItems.length,
+    retryable: retryable.length,
+    selected: limited.length,
+    feed: discovery.request,
+    latest: latest ? { title: latest.title, url: latest.url, publishedAt: latest.publishedAt ?? null } : null
+  }
+  await log(runId, NewsBotLogLevel.INFO, 'source-discovered', 'Finished feed discovery.', feedContext, source.id)
   if (!limited.length) {
-    await log(runId, NewsBotLogLevel.INFO, 'source-no-new-items', 'No new or retryable feed items were selected; all discoverable items have already been handled.', { discovered: articles.length, unseen: newItems.length, retryable: retryable.length, selected: 0 }, source.id)
+    await log(runId, NewsBotLogLevel.INFO, 'source-no-new-items', 'No new or retryable feed items were selected; all discoverable items have already been handled.', feedContext, source.id)
     return
   }
   for (const candidate of limited) {
@@ -250,7 +260,7 @@ export async function runNewsBotOnce() {
   const categories = await prisma.category.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
   const counts: Counts = { processed: 0, created: 0, skipped: 0, failed: 0 }
   await log(candidate.run.id, NewsBotLogLevel.INFO, 'run-started', 'News bot run started.', { trigger: candidate.run.trigger, enabledSources: sources.length, aiProvider: usesLocalAi() ? 'ollama' : 'deepseek', model: usesLocalAi() ? config.OLLAMA_MODEL : config.DEEPSEEK_MODEL })
-  for (const source of sources) { if (await isRunCancelled(candidate.run.id)) break; try { await processSource(source, candidate.run.id, candidate.settings.articleLimit, counts, categories) } catch (error) { counts.failed++; await log(candidate.run.id, NewsBotLogLevel.ERROR, 'source-failed', error instanceof Error ? error.message : 'Source processing failed', { source: source.name }, source.id) } }
+  for (const source of sources) { if (await isRunCancelled(candidate.run.id)) break; try { await processSource(source, candidate.run.id, candidate.settings.articleLimit, counts, categories) } catch (error) { counts.failed++; await log(candidate.run.id, NewsBotLogLevel.ERROR, 'source-failed', error instanceof Error ? error.message : 'Source processing failed', { source: source.name, feedUrl: source.feedUrl, ...(error instanceof FeedRequestError ? error.context : {}) }, source.id) } }
   const cancelled = await isRunCancelled(candidate.run.id)
   const status = cancelled ? NewsBotRunStatus.CANCELLED : counts.failed ? (counts.created || counts.skipped ? NewsBotRunStatus.PARTIAL : NewsBotRunStatus.FAILED) : NewsBotRunStatus.SUCCEEDED
   const error = status === NewsBotRunStatus.FAILED ? 'No selected articles completed successfully. Review the run log for details.' : null

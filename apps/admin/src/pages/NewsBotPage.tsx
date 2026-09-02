@@ -13,6 +13,14 @@ const empty = { name: '', feedUrl: '', sourceLabel: '', category: 'General', isE
 const format = (value?: string | null) => value ? new Date(value).toLocaleString() : '—'
 const formatHour = (hour: number) => `${String(hour).padStart(2, '0')}:00`
 const logTone = (log: Log) => log.level === 'ERROR' ? 'error' : log.level === 'WARN' ? 'warn' : /(?:complete|created|extracted|finished)/.test(log.stage) ? 'success' : 'info'
+const latestFeedSummary = (context?: Record<string, unknown> | null) => {
+  const latest = context?.latest
+  if (!latest || typeof latest !== 'object') return ''
+  const value = latest as Record<string, unknown>
+  const publishedAt = typeof value.publishedAt === 'string' ? format(value.publishedAt) : ''
+  const title = typeof value.title === 'string' ? value.title : ''
+  return [publishedAt, title].filter(Boolean).join(' · ')
+}
 
 export function NewsBotPage() {
   const [settings, setSettings] = useState<Settings>({ enabled: false, intervalMinutes: 120, articleLimit: null, workingStartHour: 8, workingEndHour: 0 })
@@ -86,7 +94,10 @@ function RunDashboard({ run, busy, close, stop }: { run: RunDetail; busy: boolea
   const failedItems = run.items.filter(item => item.status === 'FAILED')
   // A source can fail while discovering its feed, before an article item exists.
   // Those failures count toward the run total but previously had no matching card.
-  const sourceIssues = runLogs.filter(log => log.stage === 'source-failed')
+  // Item errors are shown on their item cards. Any run/source-level ERROR has no
+  // item card, so keep it visible in both All and Issues. This intentionally does
+  // not depend on a single stage name; future source adapters remain inspectable.
+  const sourceIssues = runLogs.filter(log => log.level === 'ERROR' || log.stage === 'source-failed')
   const isActive = run.status === 'QUEUED' || run.status === 'RUNNING'
   const attentionCount = failedItems.length + sourceIssues.length
   const liveCounts = { processed: isActive ? run.items.filter(item => item.status !== 'PENDING').length : run.processedCount, created: isActive ? run.items.filter(item => item.status === 'CREATED').length : run.createdCount, skipped: isActive ? run.items.filter(item => item.status === 'SKIPPED').length : run.skippedCount, failed: isActive ? attentionCount : Math.max(run.failedCount, attentionCount) }
@@ -102,7 +113,7 @@ function RunDashboard({ run, busy, close, stop }: { run: RunDetail; busy: boolea
   return <div className="modal-backdrop" onClick={close} role="presentation"><section className="media-picker-modal run-modal" role="dialog" aria-modal="true" aria-label="News bot run details" onClick={event => event.stopPropagation()}><div className="run-scroll-area">
     <header className="run-head run-hero"><div className="run-heading"><div className="run-title"><h2>Scheduled run</h2><em className={`run-status ${statusTone}`}>{run.status}</em></div><p>{format(run.startedAt || run.createdAt)}{run.finishedAt && <> <span>→</span> {format(run.finishedAt)}</>}</p></div><div className="bot-actions">{stoppable && <button className="danger" disabled={busy} onClick={stop}><Square />Stop run</button>}<button className="ghost icon-close" onClick={close} aria-label="Close run details"><X /></button></div></header>
     <section className={`run-overview ${statusTone}`} aria-label="Run summary"><StatusIcon /><b>{statusText}</b><span>{run.sourceCount} sources</span><span>{liveCounts.processed} processed</span><span>{liveCounts.created} drafts</span>{liveCounts.skipped > 0 && <span>{liveCounts.skipped} skipped</span>}{liveCounts.failed > 0 && <button onClick={() => setFilter('attention')}><AlertCircle />{liveCounts.failed} need attention</button>}</section>
-    <details className="source-checks"><summary><span>Source checks</span><small>{sourceChecks.length} of {run.sourceCount} reported</small><ChevronDown /></summary><div>{sourceChecks.map(log => <article className={`${logTone(log)} ${log.stage === 'source-no-new-items' ? 'empty' : ''}`} key={log.id}><b>{log.source?.name}</b><span>{log.stage === 'source-no-new-items' ? `No new feed items · ${String(log.context?.discovered ?? 0)} discovered` : log.stage === 'source-discovered' ? `${String(log.context?.selected ?? 0)} selected from ${String(log.context?.unseen ?? 0)} unseen` : log.message}</span></article>)}</div></details>
+    <details className="source-checks"><summary><span>Source checks</span><small>{sourceChecks.length} of {run.sourceCount} reported</small><ChevronDown /></summary><div>{sourceChecks.map(log => <article className={`${logTone(log)} ${log.stage === 'source-no-new-items' ? 'empty' : ''}`} key={log.id}><b>{log.source?.name}</b><span>{log.stage === 'source-no-new-items' ? <>No new feed items · {String(log.context?.discovered ?? 0)} discovered{latestFeedSummary(log.context) && <> · Latest: {latestFeedSummary(log.context)}</>}</> : log.stage === 'source-discovered' ? `${String(log.context?.selected ?? 0)} selected from ${String(log.context?.unseen ?? 0)} unseen` : log.message}</span></article>)}</div></details>
     <div className="run-section-head"><div><span className="eyebrow">Processing queue</span><h3>Selected items <small>{visibleQueueCount} of {queueTotal}</small></h3></div><div className="run-filters" aria-label="Filter queue"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All <b>{queueTotal}</b></button><button className={filter === 'attention' ? 'active attention' : ''} onClick={() => setFilter('attention')}>Issues <b>{liveCounts.failed}</b></button><button className={filter === 'created' ? 'active' : ''} onClick={() => setFilter('created')}>Drafts <b>{liveCounts.created}</b></button><button className={filter === 'skipped' ? 'active' : ''} onClick={() => setFilter('skipped')}>Skipped <b>{liveCounts.skipped}</b></button></div></div>
     <div className="run-items">{visibleSourceIssues.map(log => <RunSourceIssueCard log={log} key={log.id} />)}{visibleItems.map(item => <RunItemCard item={item} key={item.id} />)}{!visibleQueueCount && <div className="run-empty"><FileText /><b>No articles in this view</b><small>Try another filter to inspect the rest of this run.</small></div>}</div>
     <details className="run-events"><summary><span>System activity</span><small>{runLogs.length} events</small><ChevronDown /></summary><div className="run-logs">{runLogs.map(log => <article className={`run-log ${logTone(log)}`} key={log.id}><time>{format(log.createdAt)}</time><div><b>{log.stage.replaceAll('-', ' ')}</b><p>{log.message}</p>{log.context && <details><summary>Technical context</summary><pre>{JSON.stringify(log.context, null, 2)}</pre></details>}</div></article>)}</div></details>
