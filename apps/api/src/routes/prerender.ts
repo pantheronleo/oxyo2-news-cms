@@ -132,6 +132,10 @@ function headBlock(input: HeadInput) {
 
 const publisherJsonLd = () => ({ '@type': 'NewsMediaOrganization', name: siteName, url: absolute('/'), logo: { '@type': 'ImageObject', url: absolute('/favicon.svg'), width: 48, height: 48 } })
 
+export function pageJsonLd(type: 'AboutPage' | 'WebPage', name: string, url: string, description: string, locale: Locale) {
+  return { '@context': 'https://schema.org', '@type': type, name, url, description, inLanguage: locale, publisher: publisherJsonLd() }
+}
+
 function siteHeader(categories: Array<{ name: string; nameZh?: string | null; slug: string }>, locale: Locale) {
   const nav = categories.map(category => `<a href="${escapeHtml(withLang(`/category/${category.slug}`, locale))}">${escapeHtml(categoryLabel(category, locale))}</a>`).join('')
   return `<header class="site-header"><a class="logo" href="${withLang('/', locale)}">${siteName}<span>.</span></a><nav aria-label="Primary navigation">${nav}</nav><div class="header-actions"><form class="top-search" action="${escapeHtml(withLang('/search', locale))}" role="search"><input name="q" aria-label="${locale === 'zh-CN' ? '搜索新闻' : 'Search news'}" placeholder="${locale === 'zh-CN' ? '搜索' : 'Search'}" /><button type="submit">${locale === 'zh-CN' ? '搜索' : 'Go'}</button></form><div class="language-switch global-language-switch" aria-label="${locale === 'zh-CN' ? '语言' : 'Language'}"><a class="${locale === 'zh-CN' ? 'active' : ''}" href="/">中文</a><a class="${locale === 'en' ? 'active' : ''}" href="/?lang=en">EN</a></div></div></header>`
@@ -306,7 +310,8 @@ export async function prerenderRoutes(app: FastifyInstance) {
         ? { title: '关于 ThePaperLeaf', excerpt: 'ThePaperLeaf 是一份独立的杂志式新闻刊物，提供清晰、视觉化且富有背景脉络的报道。', html: '<p>ThePaperLeaf 是一份独立的杂志式新闻刊物，为希望兼顾清晰与深度的读者而设。我们以简洁报道、视觉叙事与实用脉络，关注商业、科技、文化、国际事务、科学与体育。</p><h2>我们为何而做</h2><p>我们的目标是让快速变化的新闻更容易理解。每个版面都会梳理重要变化、影响所在，以及读者下一步值得留意的重点。</p><h2>编辑方式</h2><ul><li>我们重视脉络而非噪音，解释每个标题背后的推动力量。</li><li>我们运用清晰分类、强烈视觉与易读摘要，让读者快速掌握内容。</li><li>我们将报道、分析与来源标示清楚区分，帮助读者判断所读资讯。</li></ul><h2>我们的承诺</h2><p>ThePaperLeaf 希望成为一个沉静、直接且现代的阅读空间：适合每日快速浏览，也适合周末深入探索影响公共生活的议题。</p>' }
         : { title: 'About ThePaperLeaf', excerpt: 'ThePaperLeaf is an independent magazine-style publication for clear, visual, and context-rich reporting.', html: '<p>ThePaperLeaf is an independent magazine-style publication built for readers who want clarity without losing depth. We cover business, technology, culture, world affairs, science, and sport through concise reporting, visual storytelling, and practical context.</p><h2>What this publication is for</h2><p>Our goal is to make fast-moving stories easier to understand. Each section is shaped around useful signals: what changed, why it matters, and what readers should watch next.</p><h2>Editorial approach</h2><ul><li>We prioritize context over noise and explain the forces behind each headline.</li><li>We use strong visuals, clear categories, and readable summaries to help readers move quickly.</li><li>We separate reporting, analysis, and source labels so readers can understand what they are reading.</li></ul><h2>Our promise</h2><p>ThePaperLeaf is designed to feel calm, direct, and modern: a place for sharp daily reading, deeper weekend browsing, and discovery across topics that shape public life.</p>' }
       const path = `/page/${slug}`
-      const head = headBlock({ title: `${about.title} — ${siteName}`, description: about.excerpt, canonical: absolute(withLang(path, locale)), locale, alternatePath: path })
+      const canonical = absolute(withLang(path, locale))
+      const head = headBlock({ title: `${about.title} — ${siteName}`, description: about.excerpt, canonical, locale, alternatePath: path, jsonLd: [{ id: `page-${slug}`, data: pageJsonLd('AboutPage', about.title, canonical, about.excerpt, locale) }] })
       return sendPage(reply, locale, head, `${siteHeader(categories, locale)}<main class="article-page"><article><h1>${escapeHtml(about.title)}</h1><div class="article-body">${about.html}</div></article></main>${siteFooter(locale)}`)
     }
     if (!itemIsPublic) return notFound(reply, categories, locale)
